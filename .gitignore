@@ -1,0 +1,81 @@
+# Common Lisp
+*.fasl
+*.fas
+*.lib
+*.dx32fsl
+*.dx64fsl
+*.lx32fsl
+*.lx64fsl
+*.x86f
+*.amd64f
+*.abcl
+*.ufasl
+*.cfsl
+*.mem
+*.wx32fsl
+*.wx64fsl
+
+# ASDF cache
+.fasls/
+.cache/
+*.cache
+
+# Quicklisp
+quicklisp/
+
+# Development environments
+.sly/
+.slime/
+*~
+\#*\#
+.\#*
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+build/
+target/
+dist/
+
+# Logs and temporary files
+*.log
+*.tmp
+logs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration files (keep templates)
+config.lisp
+secrets.lisp
+.env
+*.conf
+!*.conf.example
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+
+# Test artifacts
+coverage/
+test-results/
