@@ -1,0 +1,3 @@
+;;;; cache-manager.lisp - Stub file
+(in-package #:eve-gate.cache)
+;; Implementation pending
