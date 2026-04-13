@@ -21,5 +21,12 @@ quicklisp-manifest.txt: *.asd
 buildapp:
 	sbcl --eval '(ql:quickload "buildapp")' --eval '(buildapp:build-buildapp)' --non-interactive
 
+test:
+	sbcl --non-interactive \
+		--eval '(push #P"./" asdf:*central-registry*)' \
+		--eval '(ql:quickload :eve-gate/tests)' \
+		--eval '(asdf:test-system :eve-gate)' \
+		--eval '(quit)'
+
 clean:
 	rm -f *.fasl $(OUT) buildapp quicklisp-manifest.txt

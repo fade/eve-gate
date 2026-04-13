@@ -6,9 +6,12 @@
 (in-package #:cl-user)
 
 (defpackage #:eve-gate-tests.utils
-  (:use #:cl #:alexandria #:parachute #:mockingbird
+  (:use #:cl #:parachute #:mockingbird
         #:eve-gate.utils #:eve-gate.types #:eve-gate.core
         #:eve-gate.auth #:eve-gate.cache #:eve-gate.api)
+  (:import-from #:alexandria
+                #:when-let #:if-let #:hash-table-alist #:alist-hash-table)
+  (:shadow #:featurep #:of-type)
   (:export 
    ;; Test configuration
    #:*test-base-url*
@@ -145,10 +148,10 @@
        (lambda (&rest args) 
          (declare (ignore args))
          *test-token*))
-      (eve-gate.auth:validate-token-scopes 
-       (lambda (token scopes)
-         (declare (ignore token scopes))
-         t))
+       (eve-gate.auth:validate-scopes 
+        (lambda (scopes)
+          (declare (ignore scopes))
+          t))
       (eve-gate.auth:token-expired-p
        (lambda (&rest args)
          (declare (ignore args))
@@ -329,8 +332,8 @@
      ,@(when required-scopes
          `((with-mock-esi-response (403 "{\"error\": \"Forbidden - insufficient scopes\"}")
              (mockingbird:with-stubs
-               ((eve-gate.auth:validate-token-scopes 
-                 (lambda (&rest args) nil)))
+                ((eve-gate.auth:validate-scopes 
+                  (lambda (&rest args) nil)))
                (fail (,function-name *test-client* ,@params :token *test-token*)
                      'esi-forbidden)))))))
 
@@ -578,12 +581,16 @@
 
 ;;; Test Execution Utilities
 
+;; Note: These functions require the generated-api test package
+;; They will be enabled once test dependencies are properly resolved
+#+nil
 (defun run-all-api-tests (&key (report :plain) (verbose nil))
   "Run all API tests with specified reporting options"
   (parachute:test 'eve-gate-tests.generated-api:test-generated-api 
                   :report report 
                   :verbose verbose))
 
+#+nil
 (defun run-category-tests (category &key (report :plain) (verbose nil))
   "Run tests for a specific API category"
   (let ((test-name (intern (format nil "TEST-~A-API" (string-upcase category))

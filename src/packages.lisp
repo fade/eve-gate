@@ -28,30 +28,275 @@
 
 (defpackage #:eve-gate.types
   (:use #:cl #:alexandria)
+  (:import-from #:local-time)
+  (:import-from #:cl-ppcre)
+  (:import-from #:com.inuoe.jzon)
   (:export
-   ;; ESI specific types
+   ;; --- ESI entity ID types (esi-types.lisp) ---
+   ;; Range constants
+   #:+min-esi-id+
+   #:+max-int32+
+   #:+max-int64+
+   
+   ;; Core 32-bit entity types
+   #:esi-id
    #:character-id
    #:corporation-id
    #:alliance-id
-   #:region-id
-   #:system-id
-   #:station-id
    #:type-id
+   #:region-id
+   #:constellation-id
+   #:solar-system-id
+   #:station-id
+   #:planet-id
+   #:moon-id
+   #:stargate-id
+   #:asteroid-belt-id
+   #:market-group-id
+   #:category-id
+   #:group-id
+   #:graphic-id
+   #:dogma-attribute-id
+   #:dogma-effect-id
+   #:war-id
+   #:contract-id
+   #:killmail-id
+   #:fitting-id
+   #:schematic-id
+   #:faction-id
+   #:race-id
+   #:bloodline-id
+   #:ancestry-id
    
-   ;; Response types
+   ;; Extended 64-bit entity types
+   #:structure-id
+   #:fleet-id
+   #:item-id
+   #:order-id
+   #:transaction-id
+   #:journal-ref-id
+   #:mail-id
+   #:label-id
+   #:event-id
+   #:observer-id
+   
+   ;; Compound value types
+   #:killmail-hash
+   #:esi-datasource
+   #:esi-language
+   #:order-type
+   #:route-flag
+   #:event-response
+   #:wallet-division
+   #:security-status
+   #:standing-value
+   #:isk-amount
+   
+   ;; Predicate functions
+   #:esi-id-p
+   #:character-id-p
+   #:corporation-id-p
+   #:alliance-id-p
+   #:type-id-p
+   #:region-id-p
+   #:constellation-id-p
+   #:solar-system-id-p
+   #:station-id-p
+   #:structure-id-p
+   #:fleet-id-p
+   #:item-id-p
+   #:war-id-p
+   #:contract-id-p
+   #:killmail-id-p
+   #:order-id-p
+   #:planet-id-p
+   #:moon-id-p
+   #:stargate-id-p
+   #:asteroid-belt-id-p
+   #:market-group-id-p
+   #:category-id-p
+   #:group-id-p
+   #:graphic-id-p
+   #:dogma-attribute-id-p
+   #:dogma-effect-id-p
+   #:schematic-id-p
+   #:fitting-id-p
+   #:faction-id-p
+   #:mail-id-p
+   #:label-id-p
+   #:event-id-p
+   #:observer-id-p
+   #:non-empty-string-p
+   #:killmail-hash-p
+   #:esi-datasource-p
+   #:esi-language-p
+   
+   ;; ID type registry
+   #:*esi-id-type-map*
+   #:esi-id-predicate-for
+   
+   ;; --- Validation functions (validation.lisp) ---
+   #:*strict-id-validation*
+   
+   ;; ID validators
+   #:validate-esi-id
+   #:validate-character-id
+   #:validate-corporation-id
+   #:validate-alliance-id
+   #:validate-type-id
+   #:validate-region-id
+   #:validate-solar-system-id
+   #:validate-station-id
+   #:validate-structure-id
+   #:validate-fleet-id
+   #:validate-war-id
+   #:validate-contract-id
+   #:validate-killmail-id
+   #:validate-order-id
+   #:validate-id-by-parameter-name
+   
+   ;; String validators
+   #:validate-esi-string
+   #:validate-eve-name
+   #:validate-killmail-hash
+   #:validate-search-string
+   
+   ;; Timestamp validators
+   #:validate-esi-timestamp
+   #:validate-esi-date
+   
+   ;; Enum validators
+   #:validate-enum
+   #:validate-datasource
+   #:validate-language
+   #:validate-order-type
+   #:validate-route-flag
+   
+   ;; Numeric validators
+   #:validate-page-number
+   #:validate-wallet-division
+   #:validate-standing-value
+   
+   ;; List validators
+   #:validate-id-list
+   
+   ;; General-purpose validator
+   #:validate-api-input
+   
+   ;; --- Type conversion (conversion.lisp) ---
+   ;; String/number parsing
+   #:parse-esi-integer
+   #:parse-esi-number
+   #:parse-esi-boolean
+   
+   ;; Timestamp conversion
+   #:parse-esi-timestamp
+   #:format-esi-timestamp
+   #:parse-esi-date
+   #:format-esi-date
+   #:timestamp-to-universal-time
+   #:universal-time-to-timestamp
+   
+   ;; JSON value conversions
+   #:json-null-p
+   #:json-value-or-nil
+   #:json-to-string
+   #:json-to-integer
+   #:json-to-number
+   #:json-to-boolean
+   #:json-to-timestamp
+   #:json-to-list
+   
+   ;; ESI format conversions
+   #:datasource-to-string
+   #:language-to-string
+   #:keyword-to-esi-string
+   #:esi-string-to-keyword
+   
+   ;; Batch conversions
+   #:convert-hash-table-timestamps
+   #:convert-response-ids
+   
+   ;; --- Response types (response-types.lisp) ---
+   ;; Pagination
+   #:pagination-info
+   #:make-pagination-info
+   #:pagination-info-current-page
+   #:pagination-info-total-pages
+   #:pagination-info-has-more-p
+   #:pagination-info-page-size
+   #:extract-pagination-from-headers
+   
+   ;; Rate limit info
+   #:rate-limit-info
+   #:make-rate-limit-info
+   #:rate-limit-info-error-limit-remain
+   #:rate-limit-info-error-limit-reset
+   #:rate-limit-info-retry-after
+   #:rate-limit-info-rate-limited-p
+   #:extract-rate-limit-from-headers
+   
+   ;; Cache info
+   #:cache-info
+   #:make-cache-info
+   #:cache-info-etag
+   #:cache-info-expires
+   #:cache-info-last-modified
+   #:cache-info-cache-control
+   #:cache-info-cached-p
+   #:extract-cache-from-headers
+   
+   ;; API response wrapper
    #:api-response
    #:make-api-response
    #:api-response-data
    #:api-response-status
    #:api-response-headers
+   #:api-response-pagination
+   #:api-response-rate-limit
+   #:api-response-cache
+   #:api-response-endpoint
+   #:api-response-timestamp
    #:api-response-etag
+   #:api-response-expires
+   #:api-response-paginated-p
+   #:api-response-has-more-pages-p
+   #:api-response-total-pages
+   #:api-response-rate-limited-p
+   #:api-response-error-budget-remaining
+   #:api-response-success-p
    
-   ;; Error types
-   #:api-error
-   #:authentication-error
-   #:rate-limit-error
-   #:network-error
-   #:cache-error))
+   ;; ESI error response
+   #:esi-error-response
+   #:make-esi-error-response
+   #:esi-error-response-error-message
+   #:esi-error-response-sso-status
+   #:esi-error-response-timeout
+   #:parse-esi-error-body
+   
+   ;; Header utilities
+   #:extract-header-value
+   #:parse-http-date
+   
+   ;; --- Error types (error-types.lisp) ---
+   ;; Conditions
+   #:eve-type-error
+   #:eve-type-error-value
+   #:eve-type-error-expected-type
+   #:eve-type-error-context
+   #:eve-validation-error
+   #:eve-validation-error-errors
+   #:eve-conversion-error
+   #:eve-conversion-error-source-type
+   #:eve-conversion-error-target-type
+   #:eve-id-error
+   #:eve-id-error-id-type
+   
+   ;; Signaling utilities
+   #:signal-validation-error
+   #:signal-conversion-error
+   #:signal-id-error
+   #:default-for-type))
 
 (defpackage #:eve-gate.core
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types)

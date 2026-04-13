@@ -10,9 +10,12 @@
 (in-package #:cl-user)
 
 (defpackage #:eve-gate-tests.characters-api
-  (:use #:cl #:alexandria #:parachute #:mockingbird
+  (:use #:cl #:parachute #:mockingbird
         #:eve-gate.utils #:eve-gate.types #:eve-gate.core
         #:eve-gate.auth #:eve-gate.cache #:eve-gate.api)
+  (:import-from #:alexandria
+                #:when-let #:if-let #:hash-table-alist #:alist-hash-table)
+  (:shadow #:featurep #:of-type)
   (:export #:test-characters-api-comprehensive))
 
 (in-package #:eve-gate-tests.characters-api)

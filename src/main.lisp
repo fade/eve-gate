@@ -55,8 +55,9 @@
 (defun authenticate-client (client authorization-code)
   "Authenticate the client using OAuth2 authorization code."
   (unless (eve-client-auth-client client)
-    (error 'eve-gate.types:authentication-error 
-           :message "Client not configured for authentication"))
+    (error 'eve-gate.auth:eve-sso-error
+           :message "Client not configured for authentication"
+           :error-type :configuration))
   
   (let ((token (eve-gate.auth:exchange-code-for-token 
                 (eve-client-auth-client client) 

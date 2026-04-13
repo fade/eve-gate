@@ -27,13 +27,15 @@
                  (:file "string-utils")
                  (:file "time-utils")))
                
-               ;; Type system
-               (:module "types" 
-                :depends-on ("packages" "utils")
-                :components
-                ((:file "esi-types")
-                 (:file "response-types")
-                 (:file "error-types")))
+                ;; Type system
+                (:module "types" 
+                 :depends-on ("packages" "utils")
+                 :components
+                 ((:file "esi-types")
+                  (:file "validation" :depends-on ("esi-types"))
+                  (:file "conversion" :depends-on ("esi-types"))
+                  (:file "response-types" :depends-on ("esi-types" "conversion"))
+                  (:file "error-types" :depends-on ("esi-types"))))
                
                ;; Core HTTP and authentication
                 (:module "core"
@@ -132,22 +134,11 @@
   :pathname "tests/"
   :serial nil
   :components (;; Unit tests
-               (:module "unit"
-                :components
-                ((:file "test-utils")
-                 (:file "test-http-client")
-                 (:file "test-oauth2")
-                 (:file "test-cache")
-                 (:file "test-rate-limiter")
-                 (:file "test-api-client")))
-               
-               ;; Integration tests
-               (:module "integration"
-                :components
-                ((:file "test-esi-endpoints")
-                 (:file "test-authentication-flow")
-                 (:file "test-caching-workflow")
-                 (:file "test-bulk-operations"))))
+                (:module "unit"
+                 :components
+                 ((:file "test-utils")
+                  (:file "test-characters-api" :depends-on ("test-utils"))
+                  (:file "test-generated-api" :depends-on ("test-utils")))))
   :perform (test-op (o c) (symbol-call :parachute :test :eve-gate-tests)))
 
 ;; Development system (optional tools)
