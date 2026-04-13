@@ -1,0 +1,336 @@
+#+TITLE: Error Handling Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Error Handling Guide
+
+Eve-gate uses the Common Lisp condition system for error handling, providing
+a rich hierarchy of conditions for different error types.
+
+[[file:index.org][Back to Index]] | [[file:api-reference.org][API Reference]]
+
+** Condition Hierarchy
+
+#+begin_example
+esi-condition (base)
+├── esi-deprecation-warning (warning)
+└── esi-error (error base)
+    ├── esi-client-error (4xx)
+    │   ├── esi-bad-request (400)
+    │   ├── esi-unauthorized (401)
+    │   ├── esi-forbidden (403)
+    │   ├── esi-not-found (404)
+    │   └── esi-rate-limit-exceeded (420)
+    ├── esi-server-error (5xx)
+    │   ├── esi-internal-error (500)
+    │   ├── esi-bad-gateway (502)
+    │   ├── esi-service-unavailable (503)
+    │   └── esi-gateway-timeout (504)
+    └── esi-network-error
+        ├── esi-connection-timeout
+        └── esi-read-timeout
+#+end_example
+
+** Basic Error Handling
+
+*** Catching All ESI Errors
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 123)
+  (eve-gate.core:esi-error (c)
+    (format t "ESI Error: ~A~%" c)))
+#+end_src
+
+*** Specific Error Handling
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 1)
+  (eve-gate.core:esi-not-found (c)
+    (format t "Character not found: ~A~%" 
+            (eve-gate.core:esi-error-message c)))
+  (eve-gate.core:esi-rate-limit-exceeded (c)
+    (format t "Rate limited. Retry after ~A seconds~%"
+            (eve-gate.core:esi-rate-limit-retry-after c)))
+  (eve-gate.core:esi-unauthorized (c)
+    (format t "Authentication required or token expired~%"))
+  (eve-gate.core:esi-error (c)
+    (format t "Other ESI error (~A): ~A~%"
+            (eve-gate.core:esi-error-status-code c)
+            (eve-gate.core:esi-error-message c))))
+#+end_src
+
+** Error Condition Details
+
+*** Common Accessors
+
+All =esi-error= conditions provide:
+
+#+begin_src lisp
+(eve-gate.core:esi-error-message c)      ; Human-readable message
+(eve-gate.core:esi-error-status-code c)  ; HTTP status code
+(eve-gate.core:esi-error-endpoint c)     ; Endpoint that failed
+(eve-gate.core:esi-error-request-id c)   ; ESI request ID for debugging
+#+end_src
+
+*** Client Errors (4xx)
+
+**** 400 Bad Request
+
+Invalid parameters or malformed request.
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id -1)
+  (eve-gate.core:esi-bad-request (c)
+    (format t "Invalid request: ~A~%" (eve-gate.core:esi-error-message c))))
+#+end_src
+
+**** 401 Unauthorized
+
+Missing or invalid authentication.
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id-wallet *client* 
+      :character-id 95465499)
+  (eve-gate.core:esi-unauthorized (c)
+    (format t "Need to authenticate first~%")
+    ;; Trigger re-authentication flow
+    ))
+#+end_src
+
+**** 403 Forbidden
+
+Authenticated but lacking required scope or permission.
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id-wallet *client*
+      :character-id 95465499)
+  (eve-gate.core:esi-forbidden (c)
+    (format t "Missing required scope: esi-wallet.read_character_wallet.v1~%")))
+#+end_src
+
+**** 404 Not Found
+
+Resource doesn't exist.
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 1)
+  (eve-gate.core:esi-not-found (c)
+    (format t "Character ID 1 does not exist~%")))
+#+end_src
+
+**** 420 Rate Limited
+
+#+begin_src lisp
+(handler-case
+    (make-many-requests)
+  (eve-gate.core:esi-rate-limit-exceeded (c)
+    (let ((retry-after (eve-gate.core:esi-rate-limit-retry-after c)))
+      (format t "Rate limited. Waiting ~A seconds...~%" retry-after)
+      (sleep retry-after)
+      ;; Retry the request
+      )))
+#+end_src
+
+*** Server Errors (5xx)
+
+**** 500 Internal Server Error
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-status *client*)
+  (eve-gate.core:esi-internal-error (c)
+    (format t "ESI internal error, try again later~%")))
+#+end_src
+
+**** 502 Bad Gateway / 503 Service Unavailable / 504 Gateway Timeout
+
+Usually transient - retry with backoff:
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-status *client*)
+  (eve-gate.core:esi-server-error (c)
+    (format t "Server error (~A), will retry~%"
+            (eve-gate.core:esi-error-status-code c))
+    (sleep 5)
+    ;; Retry
+    ))
+#+end_src
+
+*** Network Errors
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-status *client*)
+  (eve-gate.core:esi-connection-timeout (c)
+    (format t "Connection timed out~%"))
+  (eve-gate.core:esi-read-timeout (c)
+    (format t "Response timed out~%"))
+  (eve-gate.core:esi-network-error (c)
+    (format t "Network error: ~A~%" c)))
+#+end_src
+
+** Authentication Errors
+
+*** SSO Errors
+
+#+begin_src lisp
+(handler-case
+    (eve-gate:authenticate-client *client* auth-code)
+  (eve-gate.auth:eve-sso-error (c)
+    (format t "SSO error type: ~A~%" 
+            (eve-gate.auth:eve-sso-error-type c))
+    (format t "Description: ~A~%"
+            (eve-gate.auth:eve-sso-error-description c))))
+#+end_src
+
+*** Token Expiration
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id-wallet *client*
+      :character-id 95465499)
+  (eve-gate.auth:eve-sso-token-expired (c)
+    (format t "Token expired, need to re-authenticate~%")
+    ;; Refresh token or re-authenticate
+    ))
+#+end_src
+
+** Deprecation Warnings
+
+ESI sometimes deprecates endpoints. Eve-gate signals warnings:
+
+#+begin_src lisp
+(handler-bind ((eve-gate.core:esi-deprecation-warning
+                (lambda (w)
+                  (format t "Deprecation: ~A~%" 
+                          (eve-gate.core:esi-deprecation-message w))
+                  (format t "Sunset date: ~A~%"
+                          (eve-gate.core:esi-deprecation-sunset w))
+                  (muffle-warning w))))
+  (eve-gate.api:get-some-deprecated-endpoint *client*))
+#+end_src
+
+** Retry Patterns
+
+*** Simple Retry
+
+#+begin_src lisp
+(defun with-retry (fn &key (max-attempts 3) (delay 1))
+  "Retry FN up to MAX-ATTEMPTS times with DELAY between attempts."
+  (loop for attempt from 1 to max-attempts
+        do (handler-case
+               (return (funcall fn))
+             (eve-gate.core:esi-server-error (c)
+               (when (= attempt max-attempts)
+                 (error c))
+               (format t "Attempt ~A failed, retrying...~%" attempt)
+               (sleep delay)))))
+#+end_src
+
+*** Exponential Backoff
+
+#+begin_src lisp
+(defun with-exponential-backoff (fn &key (max-attempts 5) (initial-delay 1))
+  "Retry FN with exponential backoff."
+  (loop for attempt from 1 to max-attempts
+        for delay = initial-delay then (* delay 2)
+        do (handler-case
+               (return (funcall fn))
+             (eve-gate.core:esi-error (c)
+               (when (= attempt max-attempts)
+                 (error c))
+               (format t "Attempt ~A failed, waiting ~As...~%" attempt delay)
+               (sleep delay)))))
+#+end_src
+
+*** Rate Limit Aware Retry
+
+#+begin_src lisp
+(defun rate-limit-aware-call (fn)
+  "Call FN, respecting rate limit retry-after headers."
+  (handler-case
+      (funcall fn)
+    (eve-gate.core:esi-rate-limit-exceeded (c)
+      (let ((retry-after (or (eve-gate.core:esi-rate-limit-retry-after c) 5)))
+        (format t "Rate limited, waiting ~As~%" retry-after)
+        (sleep retry-after)
+        (funcall fn)))))
+#+end_src
+
+** Error Logging
+
+#+begin_src lisp
+(defun log-error (condition)
+  "Log an ESI error with relevant details."
+  (eve-gate.utils:log-error 
+   "ESI request failed"
+   :status-code (eve-gate.core:esi-error-status-code condition)
+   :endpoint (eve-gate.core:esi-error-endpoint condition)
+   :request-id (eve-gate.core:esi-error-request-id condition)
+   :message (eve-gate.core:esi-error-message condition)))
+
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 123)
+  (eve-gate.core:esi-error (c)
+    (log-error c)
+    (error c)))
+#+end_src
+
+** Best Practices
+
+*** Be Specific
+
+Handle specific conditions when you can take specific action:
+
+#+begin_src lisp
+;; Good: handle rate limiting specially
+(handler-case
+    (fetch-data)
+  (eve-gate.core:esi-rate-limit-exceeded (c)
+    (sleep (eve-gate.core:esi-rate-limit-retry-after c))
+    (fetch-data))
+  (eve-gate.core:esi-error (c)
+    (log-and-report c)))
+#+end_src
+
+*** Don't Swallow Errors
+
+#+begin_src lisp
+;; Bad: silently ignores errors
+(handler-case (fetch-data)
+  (error () nil))
+
+;; Good: log and re-raise or handle appropriately
+(handler-case (fetch-data)
+  (eve-gate.core:esi-not-found ()
+    nil)  ; OK to return nil for "not found"
+  (eve-gate.core:esi-error (c)
+    (log-error c)
+    (error c)))  ; Re-raise unexpected errors
+#+end_src
+
+*** Use Request IDs
+
+ESI provides request IDs for debugging. Include them in bug reports:
+
+#+begin_src lisp
+(handler-case
+    (fetch-data)
+  (eve-gate.core:esi-error (c)
+    (format t "Error! Request ID: ~A~%" 
+            (eve-gate.core:esi-error-request-id c))
+    (format t "Please report this ID to CCP if the error persists~%")))
+#+end_src
+
+** Related Documentation
+
+- [[file:api-reference.org][API Reference]] - API function documentation
+- [[file:authentication.org][Authentication]] - SSO error handling
+- [[file:concurrency.org][Concurrency]] - Rate limiting

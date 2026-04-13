@@ -1,0 +1,265 @@
+#+TITLE: Caching Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Caching Guide
+
+Eve-gate includes a multi-tier caching system to minimize API calls and
+improve performance. This guide covers cache configuration and usage.
+
+[[file:index.org][Back to Index]] | [[file:api-reference.org][API Reference]]
+
+** Overview
+
+The caching system provides:
+
+- *Memory cache*: Fast in-process caching with LRU eviction
+- *ETag support*: Conditional requests using If-None-Match headers
+- *TTL management*: Automatic expiration based on ESI Cache-Control headers
+- *Cache policies*: Configurable per-endpoint caching behavior
+
+** Basic Usage
+
+*** Default Caching
+
+When you create an eve-client with default settings, caching is enabled:
+
+#+begin_src lisp
+(defvar *client* (eve-gate:make-eve-client))
+
+;; First call - hits the API
+(eve-gate.api:get-status *client*)
+
+;; Second call within TTL - returns cached response
+(eve-gate.api:get-status *client*)
+#+end_src
+
+*** Disabling Caching
+
+#+begin_src lisp
+(defvar *client* 
+  (eve-gate:make-eve-client 
+   :config '(:cache-enabled nil)))
+#+end_src
+
+** Cache Manager
+
+*** Creating a Cache Manager
+
+#+begin_src lisp
+(defvar *cache* 
+  (eve-gate.cache:make-cache-manager 
+   :default-ttl 300        ; 5 minutes default
+   :max-memory-entries 10000
+   :enable-etag t))
+#+end_src
+
+*** Manual Cache Operations
+
+#+begin_src lisp
+;; Store a value
+(eve-gate.cache:cache-put *cache* "my-key" my-value :ttl 600)
+
+;; Retrieve a value
+(eve-gate.cache:cache-get *cache* "my-key")
+;; => my-value (or NIL if not found/expired)
+
+;; Check existence
+(eve-gate.cache:cache-exists-p *cache* "my-key")
+
+;; Delete
+(eve-gate.cache:cache-delete *cache* "my-key")
+
+;; Clear all
+(eve-gate.cache:cache-clear *cache*)
+#+end_src
+
+** Memory Cache
+
+*** Configuration
+
+#+begin_src lisp
+(defvar *memory-cache*
+  (eve-gate.cache:make-memory-cache 
+   :max-entries 5000))    ; Maximum cached items
+#+end_src
+
+*** Operations
+
+#+begin_src lisp
+;; Basic operations
+(eve-gate.cache:memory-cache-put *memory-cache* "key" "value" :ttl 300)
+(eve-gate.cache:memory-cache-get *memory-cache* "key")
+(eve-gate.cache:memory-cache-delete *memory-cache* "key")
+
+;; Statistics
+(eve-gate.cache:memory-cache-statistics *memory-cache*)
+;; => (:count 1234 :hit-rate 0.85 :hits 8500 :misses 1500)
+
+;; Current entry count
+(eve-gate.cache:memory-cache-count *memory-cache*)
+#+end_src
+
+*** Eviction Policy
+
+The memory cache uses LRU (Least Recently Used) eviction. When the cache
+reaches =max-entries=, the least recently accessed items are removed.
+
+** ETag Caching
+
+ESI returns ETag headers for most responses. Eve-gate uses these for
+conditional requests:
+
+*** How It Works
+
+1. First request: ESI returns data with an ETag header
+2. Cache stores the response with its ETag
+3. Subsequent request: Eve-gate sends =If-None-Match: <etag>=
+4. If data hasn't changed: ESI returns 304 Not Modified
+5. Eve-gate returns the cached response
+
+*** Benefits
+
+- Reduces bandwidth (304 responses have no body)
+- Counts against rate limits but uses fewer resources
+- Always returns fresh data when changed
+
+*** Example
+
+#+begin_src lisp
+;; First call - full response
+(multiple-value-bind (body response)
+    (eve-gate.api:get-characters-character-id *client* :character-id 95465499)
+  (format t "ETag: ~A~%" (eve-gate.core:esi-response-etag response)))
+;; => ETag: "abc123..."
+
+;; Second call - if data unchanged, uses cached response
+;; The request includes If-None-Match: "abc123..."
+;; ESI returns 304, eve-gate returns cached body
+(eve-gate.api:get-characters-character-id *client* :character-id 95465499)
+#+end_src
+
+** Cache Keys
+
+Cache keys are generated from the endpoint, parameters, and authentication context:
+
+#+begin_src lisp
+;; Generate a cache key
+(eve-gate.cache:make-cache-key 
+ "/characters/95465499/assets"
+ :params '(("page" . "1"))
+ :auth-context "95465499"
+ :datasource "tranquility")
+;; => "esi:/characters/95465499/assets?page=1|auth:95465499|ds:tranquility"
+#+end_src
+
+Different authenticated users get different cache entries for the same endpoint.
+
+** Cache Policies
+
+*** Per-Endpoint TTL
+
+ESI endpoints have different cache durations. Eve-gate respects the
+=Cache-Control= and =Expires= headers from ESI responses.
+
+| Endpoint Category | Typical TTL |
+|-------------------+-------------|
+| Status            | 30 seconds  |
+| Character info    | 1 hour      |
+| Universe data     | 1 day       |
+| Market prices     | 1 hour      |
+| Market orders     | 5 minutes   |
+
+*** Custom TTL
+
+Override the default TTL:
+
+#+begin_src lisp
+(eve-gate.cache:cache-put *cache* "key" value 
+                          :ttl 3600)  ; 1 hour
+#+end_src
+
+** Cache Statistics
+
+*** Getting Statistics
+
+#+begin_src lisp
+(eve-gate.cache:cache-statistics (eve-client-cache-manager *client*))
+;; => (:hits 1500 :misses 300 :hit-rate 0.833 
+;;     :entries 2500 :memory-bytes 1234567)
+#+end_src
+
+*** REPL-Friendly Summary
+
+#+begin_src lisp
+(eve-gate.cache:cache-summary (eve-client-cache-manager *client*))
+;; Prints formatted cache statistics
+#+end_src
+
+** Cache Maintenance
+
+*** Purging Expired Entries
+
+#+begin_src lisp
+;; Remove all expired entries
+(eve-gate.cache:cache-purge-expired *cache*)
+#+end_src
+
+*** Cache Warmup
+
+Pre-populate cache with commonly needed data:
+
+#+begin_src lisp
+(defun warmup-cache (client)
+  "Pre-fetch commonly used data."
+  ;; Universe data rarely changes
+  (eve-gate.api:get-universe-regions client)
+  (eve-gate.api:get-universe-categories client)
+  (eve-gate.api:get-markets-groups client)
+  ;; Market prices update hourly
+  (eve-gate.api:get-markets-prices client))
+#+end_src
+
+** Configuration Options
+
+| Option              | Default | Description                           |
+|---------------------+---------+---------------------------------------|
+| =:cache-enabled=      | t       | Enable/disable caching                |
+| =:cache-default-ttl=  | 300     | Default TTL in seconds                |
+| =:cache-max-entries=  | 10000   | Maximum memory cache entries          |
+| =:cache-enable-etag=  | t       | Enable ETag conditional requests      |
+
+#+begin_src lisp
+(defvar *client*
+  (eve-gate:make-eve-client 
+   :config '(:cache-enabled t
+             :cache-default-ttl 600
+             :cache-max-entries 20000
+             :cache-enable-etag t)))
+#+end_src
+
+** Best Practices
+
+*** Do Cache
+
+- Universe data (regions, systems, types) - changes rarely
+- Character public info - moderate change rate
+- Market prices - hourly updates
+- Dogma attributes/effects - very stable
+
+*** Cache Carefully
+
+- Market orders - 5-minute cache, stale data can cause issues
+- Character wallet - balance changes frequently
+- Skill queue - updates when skills complete
+
+*** Don't Over-Cache
+
+- Search results - user-specific, varies widely
+- UI actions - fire and forget, no caching needed
+
+** Related Documentation
+
+- [[file:configuration.org][Configuration]] - Cache configuration options
+- [[file:concurrency.org][Concurrency]] - Rate limiting (works with caching)
+- [[file:api-reference.org][API Reference]] - Endpoint documentation

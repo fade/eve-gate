@@ -1,0 +1,91 @@
+#+TITLE: Eve-Gate Documentation
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Eve-Gate Documentation
+
+Welcome to the eve-gate documentation. Eve-gate is a comprehensive EVE Online
+ESI (EVE Swagger Interface) API client library for Common Lisp.
+
+** Documentation Index
+
+*** Getting Started
+- [[file:quickstart.org][Quickstart Guide]] - Installation and first API calls
+- [[file:authentication.org][Authentication]] - OAuth 2.0 and EVE SSO setup
+
+*** Core Documentation
+- [[file:api-reference.org][API Reference]] - Complete API function reference
+- [[file:caching.org][Caching]] - Multi-tier caching system
+- [[file:concurrency.org][Concurrency]] - Rate limiting and parallel operations
+- [[file:error-handling.org][Error Handling]] - Conditions and error recovery
+
+*** Configuration & Operations
+- [[file:configuration.org][Configuration]] - Environment and runtime configuration
+- [[file:testing.org][Testing]] - Running and writing tests
+
+*** Design
+- [[file:architecture.org][Architecture]] - System design and internals
+
+** Quick Links
+
+*** Installation
+
+#+begin_src sh
+cd ~/common-lisp/
+git clone https://github.com/fade/eve-gate.git
+#+end_src
+
+*** Basic Usage
+
+#+begin_src lisp
+(ql:quickload :eve-gate)
+(defvar *client* (eve-gate:make-eve-client))
+
+;; Get server status
+(eve-gate.api:get-status *client*)
+
+;; Get character info
+(eve-gate.api:get-characters-character-id *client* :character-id 95465499)
+#+end_src
+
+*** Running Tests
+
+#+begin_src lisp
+(asdf:test-system :eve-gate)
+#+end_src
+
+** Feature Overview
+
+| Feature                  | Description                                    |
+|--------------------------+------------------------------------------------|
+| 195 API Functions        | Complete ESI endpoint coverage                 |
+| OAuth 2.0                | Full EVE SSO authentication flow               |
+| Multi-tier Caching       | Memory + file with ETag revalidation           |
+| Rate Limiting            | Token bucket algorithm, per-endpoint limits    |
+| Parallel Execution       | Bulk operations with concurrency control       |
+| Type System              | EVE entity ID validation                       |
+| Structured Logging       | JSON/text formatters with correlation IDs      |
+| Health Monitoring        | System health checks and SLA tracking          |
+
+** Package Overview
+
+| Package               | Purpose                              |
+|-----------------------+--------------------------------------|
+| =eve-gate=              | Main client interface                |
+| =eve-gate.api=          | 195 generated API functions          |
+| =eve-gate.auth=         | OAuth 2.0 authentication             |
+| =eve-gate.cache=        | Caching subsystem                    |
+| =eve-gate.core=         | HTTP client and conditions           |
+| =eve-gate.types=        | EVE entity types                     |
+| =eve-gate.concurrent=   | Rate limiting and parallel ops       |
+| =eve-gate.utils=        | Logging, config, monitoring          |
+
+** License
+
+GNU Affero General Public License v3.0 or later.
+
+** Links
+
+- [[https://github.com/fade/eve-gate][GitHub Repository]]
+- [[https://esi.evetech.net/ui/][ESI Swagger UI]]
+- [[https://developers.eveonline.com/][EVE Developers Portal]]

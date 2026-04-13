@@ -1,0 +1,408 @@
+#+TITLE: API Reference
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* API Reference
+
+Complete reference for eve-gate's 195 generated ESI API functions and
+supporting utilities.
+
+[[file:index.org][Back to Index]] | [[file:quickstart.org][Quickstart]]
+
+** Function Naming Convention
+
+API functions follow the pattern: =HTTP-METHOD-PATH-SEGMENTS=
+
+Examples:
+- =get-status= - GET /status/
+- =get-characters-character-id= - GET /characters/{character_id}/
+- =get-characters-character-id-wallet= - GET /characters/{character_id}/wallet/
+- =post-characters-affiliation= - POST /characters/affiliation/
+
+** Common Parameters
+
+All generated API functions accept:
+
+| Parameter    | Type   | Description                                    |
+|--------------+--------+------------------------------------------------|
+| =client=       | object | API client (first positional argument)         |
+| =:datasource=  | string | "tranquility" (default) or "singularity"       |
+| =:token=       | string | OAuth token override (optional)                |
+
+Endpoint-specific parameters are passed as keywords matching the path/query
+parameter names, with underscores converted to hyphens.
+
+** API Categories
+
+*** Status
+#+begin_src lisp
+;; Server status
+(get-status client &key datasource)
+#+end_src
+
+*** Alliances
+
+#+begin_src lisp
+;; List all alliances
+(get-alliances client &key datasource)
+
+;; Get alliance info
+(get-alliances-alliance-id client :alliance-id id &key datasource)
+
+;; Get alliance corporations
+(get-alliances-alliance-id-corporations client :alliance-id id &key datasource)
+
+;; Get alliance icons
+(get-alliances-alliance-id-icons client :alliance-id id &key datasource)
+#+end_src
+
+*** Characters
+
+#+begin_src lisp
+;; Public character info
+(get-characters-character-id client :character-id id &key datasource)
+
+;; Character portrait
+(get-characters-character-id-portrait client :character-id id &key datasource)
+
+;; Character affiliation (bulk lookup)
+(post-characters-affiliation client :characters ids &key datasource)
+
+;; Authenticated endpoints (require scopes)
+(get-characters-character-id-wallet client :character-id id &key datasource token)
+(get-characters-character-id-skills client :character-id id &key datasource token)
+(get-characters-character-id-skillqueue client :character-id id &key datasource token)
+(get-characters-character-id-assets client :character-id id &key page datasource token)
+(get-characters-character-id-mail client :character-id id &key labels last-mail-id datasource token)
+(get-characters-character-id-contacts client :character-id id &key page datasource token)
+(get-characters-character-id-blueprints client :character-id id &key page datasource token)
+(get-characters-character-id-industry-jobs client :character-id id &key include-completed datasource token)
+(get-characters-character-id-orders client :character-id id &key datasource token)
+#+end_src
+
+*** Corporations
+
+#+begin_src lisp
+;; Public corporation info
+(get-corporations-corporation-id client :corporation-id id &key datasource)
+
+;; NPC corporations list
+(get-corporations-npccorps client &key datasource)
+
+;; Corporation icons
+(get-corporations-corporation-id-icons client :corporation-id id &key datasource)
+
+;; Authenticated endpoints
+(get-corporations-corporation-id-members client :corporation-id id &key datasource token)
+(get-corporations-corporation-id-structures client :corporation-id id &key page datasource token)
+(get-corporations-corporation-id-wallets client :corporation-id id &key datasource token)
+#+end_src
+
+*** Universe
+
+#+begin_src lisp
+;; Regions
+(get-universe-regions client &key datasource)
+(get-universe-regions-region-id client :region-id id &key datasource)
+
+;; Constellations
+(get-universe-constellations client &key datasource)
+(get-universe-constellations-constellation-id client :constellation-id id &key datasource)
+
+;; Systems
+(get-universe-systems client &key datasource)
+(get-universe-systems-system-id client :system-id id &key datasource)
+
+;; Stations
+(get-universe-stations-station-id client :station-id id &key datasource)
+
+;; Structures (authenticated for private structures)
+(get-universe-structures client &key datasource)
+(get-universe-structures-structure-id client :structure-id id &key datasource token)
+
+;; Types (paginated)
+(get-universe-types client &key page datasource)
+(get-universe-types-type-id client :type-id id &key datasource)
+
+;; Groups and categories
+(get-universe-categories client &key datasource)
+(get-universe-categories-category-id client :category-id id &key datasource)
+(get-universe-groups client &key page datasource)
+(get-universe-groups-group-id client :group-id id &key datasource)
+
+;; Names lookup (bulk)
+(post-universe-names client :ids ids &key datasource)
+(post-universe-ids client :names names &key datasource)
+
+;; Stargates, planets, moons, stars, asteroid belts
+(get-universe-stargates-stargate-id client :stargate-id id &key datasource)
+(get-universe-planets-planet-id client :planet-id id &key datasource)
+(get-universe-moons-moon-id client :moon-id id &key datasource)
+(get-universe-stars-star-id client :star-id id &key datasource)
+(get-universe-asteroid-belts-asteroid-belt-id client :asteroid-belt-id id &key datasource)
+#+end_src
+
+*** Markets
+
+#+begin_src lisp
+;; Market prices
+(get-markets-prices client &key datasource)
+
+;; Regional orders
+(get-markets-region-id-orders client :region-id id &key order-type type-id page datasource)
+
+;; Regional history
+(get-markets-region-id-history client :region-id id :type-id type-id &key datasource)
+
+;; Market groups
+(get-markets-groups client &key datasource)
+(get-markets-groups-market-group-id client :market-group-id id &key datasource)
+
+;; Structure markets (authenticated)
+(get-markets-structures-structure-id client :structure-id id &key page datasource token)
+
+;; Character orders (authenticated)
+(get-characters-character-id-orders client :character-id id &key datasource token)
+(get-characters-character-id-orders-history client :character-id id &key page datasource token)
+#+end_src
+
+*** Industry
+
+#+begin_src lisp
+;; Industry systems (cost indices)
+(get-industry-systems client &key datasource)
+
+;; Industry facilities
+(get-industry-facilities client &key datasource)
+
+;; Character jobs (authenticated)
+(get-characters-character-id-industry-jobs client :character-id id &key include-completed datasource token)
+
+;; Corporation jobs (authenticated)
+(get-corporations-corporation-id-industry-jobs client :corporation-id id &key include-completed page datasource token)
+#+end_src
+
+*** Dogma
+
+#+begin_src lisp
+;; Attributes
+(get-dogma-attributes client &key datasource)
+(get-dogma-attributes-attribute-id client :attribute-id id &key datasource)
+
+;; Effects
+(get-dogma-effects client &key datasource)
+(get-dogma-effects-effect-id client :effect-id id &key datasource)
+
+;; Dynamic item info
+(get-dogma-dynamic-items-type-id-item-id client :type-id type-id :item-id item-id &key datasource)
+#+end_src
+
+*** Sovereignty
+
+#+begin_src lisp
+;; Sovereignty map
+(get-sovereignty-map client &key datasource)
+
+;; Sovereignty campaigns
+(get-sovereignty-campaigns client &key datasource)
+
+;; Sovereignty structures
+(get-sovereignty-structures client &key datasource)
+#+end_src
+
+*** Faction Warfare
+
+#+begin_src lisp
+;; FW stats
+(get-fw-stats client &key datasource)
+
+;; FW wars
+(get-fw-wars client &key datasource)
+
+;; FW systems
+(get-fw-systems client &key datasource)
+
+;; FW leaderboards
+(get-fw-leaderboards client &key datasource)
+(get-fw-leaderboards-characters client &key datasource)
+(get-fw-leaderboards-corporations client &key datasource)
+#+end_src
+
+*** Incursions
+
+#+begin_src lisp
+;; Active incursions
+(get-incursions client &key datasource)
+#+end_src
+
+*** Insurance
+
+#+begin_src lisp
+;; Insurance prices
+(get-insurance-prices client &key datasource)
+#+end_src
+
+*** Killmails
+
+#+begin_src lisp
+;; Get killmail
+(get-killmails-killmail-id-killmail-hash client 
+  :killmail-id id :killmail-hash hash &key datasource)
+
+;; Character killmails (authenticated)
+(get-characters-character-id-killmails-recent client 
+  :character-id id &key page datasource token)
+#+end_src
+
+*** Contracts
+
+#+begin_src lisp
+;; Public contracts
+(get-contracts-public-region-id client :region-id id &key page datasource)
+
+;; Character contracts (authenticated)
+(get-characters-character-id-contracts client :character-id id &key page datasource token)
+#+end_src
+
+*** Fleets
+
+#+begin_src lisp
+;; Fleet info (authenticated)
+(get-fleets-fleet-id client :fleet-id id &key datasource token)
+
+;; Fleet members
+(get-fleets-fleet-id-members client :fleet-id id &key datasource token)
+
+;; Fleet wings
+(get-fleets-fleet-id-wings client :fleet-id id &key datasource token)
+#+end_src
+
+*** Routes
+
+#+begin_src lisp
+;; Calculate route
+(get-route-origin-destination client 
+  :origin origin :destination destination 
+  &key avoid connections flag datasource)
+#+end_src
+
+*** Search
+
+#+begin_src lisp
+;; Public search
+(get-search client :search search :categories categories &key strict datasource)
+
+;; Authenticated search
+(get-characters-character-id-search client 
+  :character-id id :search search :categories categories 
+  &key strict datasource token)
+#+end_src
+
+*** UI (In-Game Actions)
+
+#+begin_src lisp
+;; Open window (authenticated)
+(post-ui-autopilot-waypoint client 
+  :destination-id id &key add-to-beginning clear-other-waypoints datasource token)
+
+(post-ui-openwindow-contract client :contract-id id &key datasource token)
+(post-ui-openwindow-information client :target-id id &key datasource token)
+(post-ui-openwindow-marketdetails client :type-id id &key datasource token)
+(post-ui-openwindow-newmail client :recipients recipients &key subject body datasource token)
+#+end_src
+
+** API Client Utilities
+
+*** Creating Clients
+
+#+begin_src lisp
+;; Basic API client
+(eve-gate.api:make-api-client &key base-url user-agent 
+                                   connect-timeout read-timeout 
+                                   max-retries token-manager token)
+
+;; High-level client (includes caching, etc.)
+(eve-gate:make-eve-client &key config client-id client-secret redirect-uri
+                               enable-performance-monitoring)
+#+end_src
+
+*** Generic API Calls
+
+#+begin_src lisp
+;; Call by operation ID
+(eve-gate.api:api-call client "get_characters_character_id" 
+                       :character-id 95465499)
+
+;; HTTP verb methods
+(eve-gate.api:api-get client "/characters/95465499/" &key query-params token)
+(eve-gate.api:api-post client "/characters/affiliation/" &key content token)
+(eve-gate.api:api-put client path &key content token)
+(eve-gate.api:api-delete client path &key token)
+#+end_src
+
+*** Endpoint Introspection
+
+#+begin_src lisp
+;; Find endpoint metadata
+(eve-gate.api:find-endpoint "get_characters_character_id")
+;; => (:path "/characters/{character_id}/"
+;;     :method :get
+;;     :operation-id "get_characters_character_id"
+;;     :function-name "get-characters-character-id"
+;;     :scopes nil
+;;     :parameters ...)
+
+;; List endpoints by category
+(eve-gate.api:list-endpoints :category "Character")
+
+;; List all endpoints
+(eve-gate.api:list-all-endpoints)
+#+end_src
+
+** Response Handling
+
+*** Return Values
+
+API functions return multiple values:
+
+#+begin_src lisp
+(multiple-value-bind (body response)
+    (eve-gate.api:get-characters-character-id client :character-id 95465499)
+  (format t "Name: ~A~%" (gethash "name" body))
+  (format t "Status: ~A~%" (eve-gate.core:esi-response-status response))
+  (format t "ETag: ~A~%" (eve-gate.core:esi-response-etag response)))
+#+end_src
+
+*** Response Object
+
+#+begin_src lisp
+;; Response accessors
+(eve-gate.core:esi-response-status response)    ; HTTP status code
+(eve-gate.core:esi-response-body response)      ; Parsed body
+(eve-gate.core:esi-response-headers response)   ; Header alist
+(eve-gate.core:esi-response-etag response)      ; ETag value
+(eve-gate.core:esi-response-expires response)   ; Cache expiry
+(eve-gate.core:esi-response-pages response)     ; Total pages (if paginated)
+#+end_src
+
+** Pagination
+
+Many endpoints return paginated results:
+
+#+begin_src lisp
+;; Get first page
+(multiple-value-bind (items response)
+    (eve-gate.api:get-universe-types client :page 1)
+  (let ((total-pages (eve-gate.core:esi-response-pages response)))
+    (format t "Page 1 of ~A~%" total-pages)
+    ;; Fetch remaining pages
+    (loop for page from 2 to total-pages
+          append (eve-gate.api:get-universe-types client :page page))))
+#+end_src
+
+** Related Documentation
+
+- [[file:quickstart.org][Quickstart]] - Basic usage examples
+- [[file:authentication.org][Authentication]] - For authenticated endpoints
+- [[file:error-handling.org][Error Handling]] - API error conditions
+- [[file:caching.org][Caching]] - Response caching

@@ -1,0 +1,282 @@
+#+TITLE: Concurrency Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Concurrency Guide
+
+Eve-gate provides rate limiting and parallel request capabilities to help
+you make efficient use of the ESI API while respecting its limits.
+
+[[file:index.org][Back to Index]] | [[file:api-reference.org][API Reference]]
+
+** ESI Rate Limits
+
+The EVE Swagger Interface has rate limits to prevent abuse:
+
+| Limit Type    | Rate                    | Description                       |
+|---------------+-------------------------+-----------------------------------|
+| Global        | ~150 requests/second    | Per-IP address across all apps    |
+| Error         | Cumulative              | Errors count more heavily         |
+| Per-endpoint  | Varies                  | Some endpoints have lower limits  |
+| Per-character | ~20/second              | Authenticated endpoints           |
+
+Eve-gate automatically handles these limits using token bucket rate limiters.
+
+** Rate Limiting
+
+*** Automatic Rate Limiting
+
+Rate limiting is enabled by default:
+
+#+begin_src lisp
+(defvar *client* (eve-gate:make-eve-client))
+
+;; Requests are automatically throttled to stay within limits
+(loop for id in character-ids
+      collect (eve-gate.api:get-characters-character-id *client* 
+                                                         :character-id id))
+#+end_src
+
+*** Token Bucket Algorithm
+
+Eve-gate uses the token bucket algorithm:
+
+- Buckets hold tokens (representing allowed requests)
+- Tokens are consumed when making requests
+- Tokens refill at a constant rate
+- If no tokens available, request waits
+
+#+begin_src lisp
+;; Create a custom rate limiter
+(defvar *limiter*
+  (eve-gate.concurrent:make-token-bucket 
+   :max-tokens 100      ; Burst capacity
+   :refill-rate 10))    ; Tokens per second
+
+;; Try to acquire a token
+(eve-gate.concurrent:bucket-try-acquire *limiter*)
+;; => T (if token available)
+;; => NIL (if no tokens)
+
+;; Check available tokens
+(eve-gate.concurrent:bucket-tokens-available *limiter*)
+;; => 99.5
+#+end_src
+
+*** Per-Endpoint Limits
+
+Some endpoints have stricter limits:
+
+#+begin_src lisp
+;; Search endpoints are heavily limited
+(eve-gate.api:get-characters-character-id-search *client*
+  :character-id 95465499
+  :search "rifter"
+  :categories '("inventory_type"))
+;; Rate limited to ~10/minute per character
+
+;; Market endpoints have moderate limits
+(eve-gate.api:get-markets-region-id-orders *client*
+  :region-id 10000002
+  :type-id 587)
+;; Rate limited but higher than search
+#+end_src
+
+** Bulk Operations
+
+### Parallel Requests
+
+For fetching multiple items efficiently:
+
+#+begin_src lisp
+;; Fetch multiple characters in parallel
+(eve-gate.concurrent:bulk-get *client*
+  '("/characters/95465499/"
+    "/characters/95465500/"
+    "/characters/95465501/"))
+;; => List of responses (in order)
+
+;; With custom concurrency
+(eve-gate.concurrent:bulk-get *client* urls
+  :max-concurrent 10    ; Parallel workers
+  :timeout 30)          ; Per-request timeout
+#+end_src
+
+*** Bulk Operations
+
+#+begin_src lisp
+;; General bulk operation
+(eve-gate.concurrent:bulk-operations *client*
+  (list 
+   (lambda (c) (eve-gate.api:get-characters-character-id c :character-id 123))
+   (lambda (c) (eve-gate.api:get-characters-character-id c :character-id 456))
+   (lambda (c) (eve-gate.api:get-corporations-corporation-id c :corporation-id 789)))
+  :max-concurrent 5)
+#+end_src
+
+*** Paginated Fetching
+
+#+begin_src lisp
+(defun fetch-all-pages (client endpoint-fn &rest args)
+  "Fetch all pages of a paginated endpoint."
+  (multiple-value-bind (first-page response)
+      (apply endpoint-fn client :page 1 args)
+    (let ((total-pages (eve-gate.core:esi-response-pages response)))
+      (if (<= total-pages 1)
+          first-page
+          (append first-page
+                  (loop for page from 2 to total-pages
+                        append (apply endpoint-fn client :page page args)))))))
+
+;; Usage
+(fetch-all-pages *client* #'eve-gate.api:get-universe-types)
+#+end_src
+
+** Request Queue
+
+### Queue Management
+
+Eve-gate queues requests when rate limited:
+
+#+begin_src lisp
+;; Check queue status
+(eve-gate.concurrent:queue-status *request-queue*)
+
+;; Queue metrics
+(eve-gate.concurrent:queue-pending-count *request-queue*)
+(eve-gate.concurrent:queue-processed-count *request-queue*)
+#+end_src
+
+*** Timeout Handling
+
+#+begin_src lisp
+;; Configure queue timeout
+(defvar *client*
+  (eve-gate:make-eve-client
+   :config '(:queue-timeout 60)))  ; Wait up to 60s for rate limit
+
+;; Handle timeout
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 123)
+  (eve-gate.core:esi-rate-limit-exceeded (c)
+    (format t "Rate limited, retry after ~A seconds~%" 
+            (eve-gate.core:esi-rate-limit-retry-after c))))
+#+end_src
+
+** Concurrent Patterns
+
+*** Worker Pool
+
+#+begin_src lisp
+(defun process-characters (client character-ids processor-fn)
+  "Process characters in parallel with controlled concurrency."
+  (let ((results (make-array (length character-ids) :fill-pointer 0)))
+    (eve-gate.concurrent:with-worker-pool (pool :workers 5)
+      (loop for id in character-ids
+            do (eve-gate.concurrent:submit-job pool
+                 (lambda ()
+                   (let ((data (eve-gate.api:get-characters-character-id 
+                                client :character-id id)))
+                     (vector-push-extend (funcall processor-fn data) results))))))
+    results))
+#+end_src
+
+*** Batch Processing
+
+#+begin_src lisp
+(defun batch-process (items batch-size process-fn)
+  "Process items in batches with delays between batches."
+  (loop for batch in (partition-all batch-size items)
+        do (mapc process-fn batch)
+           (sleep 1)))  ; Rate limit protection
+
+;; Usage
+(batch-process character-ids 10
+  (lambda (id) 
+    (eve-gate.api:get-characters-character-id *client* :character-id id)))
+#+end_src
+
+** Configuration Options
+
+| Option                 | Default | Description                          |
+|------------------------+---------+--------------------------------------|
+| =:rate-limit-enabled=    | t       | Enable automatic rate limiting       |
+| =:global-rate-limit=     | 150     | Requests per second (global)         |
+| =:endpoint-rate-limits=  | (alist) | Per-endpoint limits                  |
+| =:max-concurrent=        | 20      | Max parallel requests                |
+| =:queue-timeout=         | 30      | Seconds to wait when rate limited    |
+| =:worker-threads=        | 4       | Worker threads for bulk operations   |
+
+#+begin_src lisp
+(defvar *client*
+  (eve-gate:make-eve-client
+   :config '(:rate-limit-enabled t
+             :global-rate-limit 100
+             :max-concurrent 10
+             :queue-timeout 60
+             :worker-threads 8)))
+#+end_src
+
+** Monitoring
+
+*** Rate Limit Statistics
+
+#+begin_src lisp
+(eve-gate.concurrent:rate-limiter-stats *limiter*)
+;; => (:total-acquired 1500
+;;     :total-waited 45.3
+;;     :avg-wait 0.03
+;;     :current-tokens 145.2)
+#+end_src
+
+*** Request Metrics
+
+#+begin_src lisp
+(eve-gate.utils:request-metrics)
+;; => (:total-requests 5000
+;;     :successful 4950
+;;     :failed 50
+;;     :rate-limited 23
+;;     :avg-latency-ms 150)
+#+end_src
+
+** Best Practices
+
+*** Minimize Requests
+
+- Use bulk endpoints when available (e.g., =post-characters-affiliation=)
+- Cache responses appropriately (see [[file:caching.org][Caching]])
+- Batch related operations
+
+*** Handle Rate Limits Gracefully
+
+#+begin_src lisp
+(defun resilient-fetch (client fetch-fn &key (max-retries 3))
+  "Fetch with automatic retry on rate limiting."
+  (loop for attempt from 1 to max-retries
+        do (handler-case
+               (return (funcall fetch-fn client))
+             (eve-gate.core:esi-rate-limit-exceeded (c)
+               (when (< attempt max-retries)
+                 (sleep (or (eve-gate.core:esi-rate-limit-retry-after c) 5)))))))
+#+end_src
+
+*** Respect Error Limits
+
+ESI tracks error rates. Too many errors can result in temporary bans:
+
+#+begin_src lisp
+;; Check error window header
+(eve-gate.core:esi-response-error-limit-remain response)
+(eve-gate.core:esi-response-error-limit-reset response)
+
+;; Back off when errors accumulate
+(when (< error-limit-remain 10)
+  (sleep error-limit-reset))
+#+end_src
+
+** Related Documentation
+
+- [[file:caching.org][Caching]] - Reduce requests through caching
+- [[file:error-handling.org][Error Handling]] - Rate limit error conditions
+- [[file:configuration.org][Configuration]] - Concurrency settings

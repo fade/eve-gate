@@ -1,0 +1,168 @@
+#+TITLE: Quickstart Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Quickstart Guide
+
+This guide will get you up and running with eve-gate in minutes.
+
+[[file:index.org][Back to Index]]
+
+** Installation
+
+*** Prerequisites
+
+- SBCL (Steel Bank Common Lisp) or another ANSI Common Lisp implementation
+- Quicklisp for dependency management
+- Git
+
+*** Clone the Repository
+
+#+begin_src sh
+cd ~/common-lisp/  # Or your ASDF source registry path
+git clone https://github.com/fade/eve-gate.git
+#+end_src
+
+*** Load the System
+
+#+begin_src lisp
+(ql:quickload :eve-gate)
+#+end_src
+
+** Your First API Call
+
+*** Create a Client
+
+For public (unauthenticated) endpoints:
+
+#+begin_src lisp
+(in-package :eve-gate)
+
+(defvar *client* (make-eve-client))
+#+end_src
+
+*** Get Server Status
+
+#+begin_src lisp
+(eve-gate.api:get-status *client*)
+;; => #<HASH-TABLE :COUNT 4>
+;;    "players" -> 31234
+;;    "server_version" -> "2162163"
+;;    "start_time" -> "2026-04-13T11:00:00Z"
+;;    "vip" -> NIL
+#+end_src
+
+*** Get Character Information
+
+#+begin_src lisp
+(eve-gate.api:get-characters-character-id *client* :character-id 95465499)
+;; => #<HASH-TABLE>
+;;    "name" -> "CCP Bartender"
+;;    "corporation_id" -> 98000001
+;;    "birthday" -> "2015-03-24T11:30:00Z"
+;;    ...
+#+end_src
+
+*** Get Universe Data
+
+#+begin_src lisp
+;; List all regions
+(eve-gate.api:get-universe-regions *client*)
+;; => #(10000001 10000002 10000003 ...)
+
+;; Get type IDs (paginated)
+(eve-gate.api:get-universe-types *client* :page 1)
+;; => #(0 1 2 3 4 ...)
+#+end_src
+
+** Working with Authenticated Endpoints
+
+For endpoints that require authentication, see [[file:authentication.org][Authentication Guide]].
+
+*** Quick Preview
+
+#+begin_src lisp
+;; Create client with OAuth credentials
+(defvar *auth-client*
+  (make-eve-client 
+   :client-id "your-client-id"
+   :client-secret "your-client-secret"
+   :redirect-uri "http://localhost:29170/oauth/callback"))
+
+;; Generate authorization URL
+(eve-gate.auth:get-authorization-url 
+ (eve-client-auth-client *auth-client*)
+ :scopes '("esi-wallet.read_character_wallet.v1"))
+;; => "https://login.eveonline.com/v2/oauth/authorize?..."
+
+;; After user authorizes, exchange code for tokens
+(authenticate-client *auth-client* "authorization-code-from-callback")
+
+;; Now authenticated endpoints work
+(eve-gate.api:get-characters-character-id-wallet *auth-client* 
+                                                  :character-id 95465499)
+#+end_src
+
+** Common Patterns
+
+*** Using the Singularity Test Server
+
+#+begin_src lisp
+;; Use datasource parameter to hit the test server
+(eve-gate.api:get-status *client* :datasource "singularity")
+#+end_src
+
+*** Error Handling
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.api:get-characters-character-id *client* :character-id 1)
+  (eve-gate.core:esi-not-found (c)
+    (format t "Character not found: ~A~%" (eve-gate.core:esi-error-message c)))
+  (eve-gate.core:esi-error (c)
+    (format t "ESI error: ~A~%" c)))
+#+end_src
+
+See [[file:error-handling.org][Error Handling]] for complete documentation.
+
+*** Checking Response Headers
+
+API functions return multiple values:
+
+#+begin_src lisp
+(multiple-value-bind (body response)
+    (eve-gate.api:get-status *client*)
+  (format t "Players: ~A~%" (gethash "players" body))
+  (format t "ETag: ~A~%" (eve-gate.core:esi-response-etag response)))
+#+end_src
+
+** Next Steps
+
+- [[file:authentication.org][Authentication]] - Set up OAuth 2.0 for authenticated endpoints
+- [[file:api-reference.org][API Reference]] - Browse all 195 API functions
+- [[file:caching.org][Caching]] - Enable caching for better performance
+- [[file:configuration.org][Configuration]] - Configure timeouts, retries, and more
+
+** Troubleshooting
+
+*** "Package EVE-GATE not found"
+
+Make sure the system is loaded:
+
+#+begin_src lisp
+(ql:quickload :eve-gate)
+#+end_src
+
+*** Connection Timeouts
+
+Increase the timeout:
+
+#+begin_src lisp
+(defvar *client* 
+  (make-eve-client :config '(:default-timeout 60)))
+#+end_src
+
+*** Rate Limiting
+
+Eve-gate handles rate limiting automatically. If you're hitting limits,
+see [[file:concurrency.org][Concurrency]] for configuration options.

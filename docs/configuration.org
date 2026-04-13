@@ -1,0 +1,325 @@
+#+TITLE: Configuration Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Configuration Guide
+
+Eve-gate supports multiple configuration sources with a clear precedence order.
+This guide covers all configuration options and methods.
+
+[[file:index.org][Back to Index]] | [[file:quickstart.org][Quickstart]]
+
+** Configuration Precedence
+
+Configuration values are resolved in this order (highest to lowest):
+
+1. *Programmatic* - Values passed directly to functions
+2. *Environment variables* - =EVE_GATE_*= variables
+3. *Configuration files* - JSON or Lisp config files
+4. *Defaults* - Built-in default values
+
+** Environment Variables
+
+| Variable                   | Description                              |
+|----------------------------+------------------------------------------|
+| =EVE_GATE_CLIENT_ID=         | OAuth client ID                          |
+| =EVE_GATE_CLIENT_SECRET=     | OAuth client secret                      |
+| =EVE_GATE_REDIRECT_URI=      | OAuth callback URL                       |
+| =EVE_GATE_DATASOURCE=        | ESI datasource (tranquility/singularity) |
+| =EVE_GATE_LOG_LEVEL=         | Log level (trace/debug/info/warn/error)  |
+| =EVE_GATE_CACHE_ENABLED=     | Enable caching (true/false)              |
+| =EVE_GATE_HTTP_TIMEOUT=      | HTTP timeout in seconds                  |
+| =EVE_GATE_HTTP_RETRIES=      | Max retry attempts                       |
+
+Example:
+
+#+begin_src sh
+export EVE_GATE_CLIENT_ID="your-client-id"
+export EVE_GATE_CLIENT_SECRET="your-client-secret"
+export EVE_GATE_LOG_LEVEL="debug"
+export EVE_GATE_CACHE_ENABLED="true"
+#+end_src
+
+** Configuration Files
+
+*** Lisp Format
+
+Create =~/.config/eve-gate/config.lisp=:
+
+#+begin_src lisp
+;; Eve-gate configuration
+(:environment :development
+ :http-timeout 30
+ :http-retries 3
+ :cache-enabled t
+ :cache-default-ttl 300
+ :cache-max-entries 10000
+ :log-level :info
+ :log-format :text
+ :rate-limit-enabled t
+ :worker-threads 4)
+#+end_src
+
+*** JSON Format
+
+Create =~/.config/eve-gate/config.json=:
+
+#+begin_src json
+{
+  "environment": "development",
+  "http_timeout": 30,
+  "http_retries": 3,
+  "cache_enabled": true,
+  "cache_default_ttl": 300,
+  "cache_max_entries": 10000,
+  "log_level": "info",
+  "log_format": "text",
+  "rate_limit_enabled": true,
+  "worker_threads": 4
+}
+#+end_src
+
+*** Loading Configuration Files
+
+#+begin_src lisp
+;; Load from default location
+(eve-gate.utils:load-config)
+
+;; Load from specific file
+(eve-gate.utils:load-config :file "~/my-eve-config.lisp")
+
+;; Load with environment override
+(eve-gate.utils:load-config :environment :production)
+#+end_src
+
+** Programmatic Configuration
+
+*** At Client Creation
+
+#+begin_src lisp
+(defvar *client*
+  (eve-gate:make-eve-client
+   :config '(:http-timeout 60
+             :http-retries 5
+             :cache-enabled t
+             :log-level :debug)
+   :client-id "your-client-id"
+   :client-secret "your-client-secret"
+   :redirect-uri "http://localhost:29170/oauth/callback"))
+#+end_src
+
+*** Runtime Configuration
+
+#+begin_src lisp
+;; Update configuration at runtime
+(eve-gate:configure-client *client*
+  :log-level :debug
+  :cache-enabled nil)
+#+end_src
+
+** Configuration Reference
+
+*** HTTP Settings
+
+| Option            | Type    | Default | Description                    |
+|-------------------+---------+---------+--------------------------------|
+| =:http-timeout=     | integer | 30      | Request timeout (seconds)      |
+| =:http-retries=     | integer | 3       | Max retry attempts             |
+| =:connect-timeout=  | integer | 10      | Connection timeout (seconds)   |
+| =:user-agent=       | string  | ...     | User-Agent header              |
+| =:base-url=         | string  | ...     | ESI base URL                   |
+
+*** Cache Settings
+
+| Option               | Type    | Default | Description                    |
+|----------------------+---------+---------+--------------------------------|
+| =:cache-enabled=       | boolean | t       | Enable caching                 |
+| =:cache-default-ttl=   | integer | 300     | Default TTL (seconds)          |
+| =:cache-max-entries=   | integer | 10000   | Max memory cache entries       |
+| =:cache-enable-etag=   | boolean | t       | Enable ETag conditional reqs   |
+
+*** Authentication Settings
+
+| Option           | Type   | Default | Description                     |
+|------------------+--------+---------+---------------------------------|
+| =:client-id=       | string | nil     | OAuth client ID                 |
+| =:client-secret=   | string | nil     | OAuth client secret             |
+| =:redirect-uri=    | string | ...     | OAuth callback URL              |
+| =:token-refresh-buffer= | integer | 300 | Refresh token N sec before exp |
+
+*** Rate Limiting Settings
+
+| Option                | Type    | Default | Description                   |
+|-----------------------+---------+---------+-------------------------------|
+| =:rate-limit-enabled=   | boolean | t       | Enable rate limiting          |
+| =:global-rate-limit=    | integer | 150     | Global requests/second        |
+| =:max-concurrent=       | integer | 20      | Max parallel requests         |
+| =:queue-timeout=        | integer | 30      | Queue wait timeout (seconds)  |
+
+*** Logging Settings
+
+| Option        | Type    | Default | Description                      |
+|---------------+---------+---------+----------------------------------|
+| =:log-level=    | keyword | :info   | Minimum log level                |
+| =:log-format=   | keyword | :text   | Output format (:text or :json)   |
+| =:log-output=   | stream  | *standard-output* | Output destination     |
+| =:log-file=     | string  | nil     | Log file path (optional)         |
+
+Valid log levels: =:trace=, =:debug=, =:info=, =:warn=, =:error=
+
+*** Concurrency Settings
+
+| Option            | Type    | Default | Description                    |
+|-------------------+---------+---------+--------------------------------|
+| =:worker-threads=   | integer | 4       | Parallel worker threads        |
+| =:thread-pool-size= | integer | 10      | Connection pool size           |
+
+*** Environment Settings
+
+| Option         | Type    | Default      | Description                    |
+|----------------+---------+--------------+--------------------------------|
+| =:environment=   | keyword | :development | Environment name               |
+| =:debug-mode=    | boolean | nil          | Enable debug features          |
+| =:datasource=    | string  | "tranquility" | ESI datasource                |
+
+** Environment-Specific Configuration
+
+Eve-gate supports environment-specific configuration:
+
+*** Built-in Environments
+
+#+begin_src lisp
+;; Development (default)
+(eve-gate.utils:load-config :environment :development)
+;; - Debug logging enabled
+;; - Shorter timeouts
+;; - May use Singularity
+
+;; Production
+(eve-gate.utils:load-config :environment :production)
+;; - Info logging
+;; - Standard timeouts
+;; - Uses Tranquility
+
+;; Testing
+(eve-gate.utils:load-config :environment :testing)
+;; - Debug logging
+;; - Uses Singularity
+;; - Shorter cache TTLs
+#+end_src
+
+*** Custom Environments
+
+#+begin_src lisp
+;; Define custom environment
+(eve-gate.utils:define-environment :staging
+  '(:log-level :info
+    :cache-enabled t
+    :datasource "singularity"
+    :debug-mode t))
+
+;; Use it
+(eve-gate.utils:load-config :environment :staging)
+#+end_src
+
+** Configuration Manager
+
+*** Initialize
+
+#+begin_src lisp
+(eve-gate.utils:initialize-config-manager
+ :environment :production
+ :sources (list 
+           (eve-gate.utils:make-env-source)
+           (eve-gate.utils:make-file-source "~/.config/eve-gate/config.lisp")
+           (eve-gate.utils:make-file-source "config/default.lisp")))
+#+end_src
+
+*** Get Configuration Values
+
+#+begin_src lisp
+;; Get a value
+(eve-gate.utils:config-get :http-timeout)
+;; => 30
+
+;; Get with default
+(eve-gate.utils:config-get :custom-option :default 42)
+;; => 42
+
+;; Get all configuration
+(eve-gate.utils:config-all)
+#+end_src
+
+*** Validate Configuration
+
+#+begin_src lisp
+(eve-gate.utils:validate-config)
+;; => T if valid
+;; Signals error with details if invalid
+#+end_src
+
+** Secrets Management
+
+*** Never Commit Secrets
+
+#+begin_src lisp
+;; Bad: secrets in code
+(defvar *client*
+  (make-eve-client :client-secret "abc123"))
+
+;; Good: secrets from environment
+(defvar *client*
+  (make-eve-client :client-secret (uiop:getenv "EVE_GATE_CLIENT_SECRET")))
+#+end_src
+
+*** Secrets File
+
+Create a separate file for secrets (add to .gitignore):
+
+#+begin_src lisp
+;; ~/.config/eve-gate/secrets.lisp
+(:client-id "your-id"
+ :client-secret "your-secret")
+#+end_src
+
+Load separately:
+
+#+begin_src lisp
+(eve-gate.utils:load-secrets "~/.config/eve-gate/secrets.lisp")
+#+end_src
+
+** Configuration Validation
+
+Eve-gate validates configuration values:
+
+#+begin_src lisp
+;; Invalid values raise errors
+(eve-gate:make-eve-client 
+ :config '(:http-timeout -1))
+;; => Error: :http-timeout must be a positive integer
+
+(eve-gate:make-eve-client
+ :config '(:log-level :invalid))
+;; => Error: :log-level must be one of :trace :debug :info :warn :error
+#+end_src
+
+** Debugging Configuration
+
+#+begin_src lisp
+;; Print current configuration
+(eve-gate.utils:print-config)
+
+;; Check effective value and source
+(eve-gate.utils:config-source :http-timeout)
+;; => (:value 30 :source :environment :key "EVE_GATE_HTTP_TIMEOUT")
+
+;; List all configuration sources
+(eve-gate.utils:config-sources)
+#+end_src
+
+** Related Documentation
+
+- [[file:quickstart.org][Quickstart]] - Basic setup
+- [[file:authentication.org][Authentication]] - OAuth configuration
+- [[file:caching.org][Caching]] - Cache configuration
+- [[file:concurrency.org][Concurrency]] - Rate limiting configuration

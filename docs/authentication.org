@@ -1,0 +1,256 @@
+#+TITLE: Authentication Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Authentication Guide
+
+Eve-gate implements OAuth 2.0 authentication for the EVE Online Single Sign-On
+(SSO) system. This guide covers setting up authentication for accessing
+protected ESI endpoints.
+
+[[file:index.org][Back to Index]] | [[file:quickstart.org][Quickstart]]
+
+** Overview
+
+EVE SSO uses the OAuth 2.0 authorization code flow:
+
+1. Your application generates an authorization URL
+2. User authenticates at login.eveonline.com
+3. EVE SSO redirects back with an authorization code
+4. Your application exchanges the code for access/refresh tokens
+5. Access token is used in API requests
+6. When the access token expires, the refresh token obtains a new one
+
+** Setting Up Your Application
+
+*** Register at EVE Developers
+
+1. Go to [[https://developers.eveonline.com/]]
+2. Create a new application
+3. Note your *Client ID* and *Client Secret*
+4. Set a *Callback URL* (e.g., =http://localhost:29170/oauth/callback=)
+5. Select the ESI scopes your application needs
+
+*** Create an Authenticated Client
+
+#+begin_src lisp
+(ql:quickload :eve-gate)
+(in-package :eve-gate)
+
+(defvar *client*
+  (make-eve-client 
+   :client-id "your-client-id-here"
+   :client-secret "your-client-secret-here"
+   :redirect-uri "http://localhost:29170/oauth/callback"))
+#+end_src
+
+** Authorization Flow
+
+*** Step 1: Generate Authorization URL
+
+#+begin_src lisp
+(defvar *auth-url*
+  (eve-gate.auth:get-authorization-url 
+   (eve-client-auth-client *client*)
+   :scopes '("esi-wallet.read_character_wallet.v1"
+             "esi-skills.read_skills.v1"
+             "esi-assets.read_assets.v1")))
+
+(format t "Visit this URL to authorize:~%~A~%" *auth-url*)
+#+end_src
+
+*** Step 2: Handle the Callback
+
+After the user authorizes, EVE SSO redirects to your callback URL with a =code=
+parameter. Extract this code from the URL.
+
+For local development, you can use a simple approach:
+
+#+begin_src lisp
+;; The callback URL will look like:
+;; http://localhost:29170/oauth/callback?code=AUTH_CODE_HERE
+
+;; Extract the code and use it:
+(defvar *auth-code* "paste-the-code-here")
+#+end_src
+
+*** Step 3: Exchange Code for Tokens
+
+#+begin_src lisp
+(authenticate-client *client* *auth-code*)
+;; => *client* is now authenticated
+#+end_src
+
+*** Step 4: Make Authenticated API Calls
+
+#+begin_src lisp
+;; Get character wallet
+(eve-gate.api:get-characters-character-id-wallet *client* 
+                                                  :character-id 95465499)
+
+;; Get character skills
+(eve-gate.api:get-characters-character-id-skills *client*
+                                                  :character-id 95465499)
+#+end_src
+
+** ESI Scopes
+
+*** Scope Categories
+
+| Category    | Count | Description                    |
+|-------------+-------+--------------------------------|
+| Character   |    25 | Character data and actions     |
+| Corporation |    18 | Corporation data               |
+| Wallet      |     4 | Wallet and transactions        |
+| Assets      |     2 | Asset locations and contents   |
+| Mail        |     4 | EVE mail access                |
+| Fleets      |     2 | Fleet management               |
+| UI          |     4 | In-game UI actions             |
+| Markets     |     2 | Market orders and history      |
+| Other       |     4 | Search, bookmarks, etc.        |
+
+*** Listing Available Scopes
+
+#+begin_src lisp
+;; All scopes
+(eve-gate.auth:all-scopes)
+
+;; Scopes by category
+(eve-gate.auth:scopes-by-category)
+
+;; Character-related scopes
+(eve-gate.auth:character-scopes)
+
+;; Read-only scopes
+(eve-gate.auth:all-read-scopes)
+#+end_src
+
+*** Common Scope Sets
+
+#+begin_src lisp
+;; Basic character info
+(defvar *basic-scopes*
+  '("esi-skills.read_skills.v1"
+    "esi-skills.read_skillqueue.v1"
+    "esi-wallet.read_character_wallet.v1"))
+
+;; Industry operations
+(defvar *industry-scopes*
+  '("esi-industry.read_character_jobs.v1"
+    "esi-industry.read_character_mining.v1"
+    "esi-markets.read_character_orders.v1"))
+
+;; Corporation management
+(defvar *corp-scopes*
+  '("esi-corporations.read_corporation_membership.v1"
+    "esi-corporations.read_structures.v1"
+    "esi-wallet.read_corporation_wallets.v1"))
+#+end_src
+
+** Token Management
+
+*** Automatic Token Refresh
+
+Eve-gate automatically refreshes expired access tokens when you have a valid
+refresh token:
+
+#+begin_src lisp
+;; The token manager handles refresh automatically
+(eve-gate.api:get-characters-character-id-wallet *client* 
+                                                  :character-id 95465499)
+;; If access token is expired, it will be refreshed before the request
+#+end_src
+
+*** Manual Token Management
+
+#+begin_src lisp
+;; Get current token info
+(eve-gate.auth:get-token-info (eve-client-auth-client *client*))
+
+;; Check if token is expired
+(eve-gate.auth:token-expired-p token-info)
+
+;; Check if token needs refresh (within buffer period)
+(eve-gate.auth:token-needs-refresh-p token-info)
+
+;; Manually refresh
+(eve-gate.auth:refresh-access-token (eve-client-auth-client *client*))
+#+end_src
+
+*** Token Storage
+
+For persistent token storage across sessions:
+
+#+begin_src lisp
+;; Export tokens for storage
+(defvar *tokens* (eve-gate.auth:export-tokens (eve-client-auth-client *client*)))
+
+;; Save to file (implement your own secure storage)
+(with-open-file (out "~/.eve-gate-tokens.lisp" :direction :output)
+  (prin1 *tokens* out))
+
+;; Later, restore tokens
+(with-open-file (in "~/.eve-gate-tokens.lisp")
+  (let ((tokens (read in)))
+    (eve-gate.auth:import-tokens (eve-client-auth-client *client*) tokens)))
+#+end_src
+
+** Security Best Practices
+
+*** Protect Your Credentials
+
+- *Never* commit client secrets to version control
+- Use environment variables for sensitive values:
+
+#+begin_src lisp
+(defvar *client*
+  (make-eve-client 
+   :client-id (uiop:getenv "EVE_CLIENT_ID")
+   :client-secret (uiop:getenv "EVE_CLIENT_SECRET")
+   :redirect-uri (uiop:getenv "EVE_REDIRECT_URI")))
+#+end_src
+
+*** Minimal Scopes
+
+Request only the scopes your application actually needs.
+
+*** Token Security
+
+- Store refresh tokens securely (encrypted if possible)
+- Don't log or display access tokens
+- Revoke tokens when no longer needed
+
+** Error Handling
+
+*** Authentication Errors
+
+#+begin_src lisp
+(handler-case
+    (authenticate-client *client* auth-code)
+  (eve-gate.auth:eve-sso-error (c)
+    (format t "SSO Error: ~A~%" (eve-gate.auth:eve-sso-error-description c)))
+  (eve-gate.auth:eve-sso-token-expired (c)
+    (format t "Token expired, need to re-authenticate~%")))
+#+end_src
+
+*** Scope Validation
+
+#+begin_src lisp
+;; Check if a scope is valid
+(eve-gate.auth:valid-scope-p "esi-wallet.read_character_wallet.v1")
+;; => T
+
+(eve-gate.auth:valid-scope-p "invalid-scope")
+;; => NIL
+
+;; Validate a list of scopes
+(eve-gate.auth:validate-scopes 
+ '("esi-wallet.read_character_wallet.v1" "invalid-scope"))
+;; => signals error for invalid scope
+#+end_src
+
+** Related Documentation
+
+- [[file:api-reference.org][API Reference]] - Authenticated endpoint functions
+- [[file:error-handling.org][Error Handling]] - SSO error conditions
+- [[file:configuration.org][Configuration]] - OAuth configuration options

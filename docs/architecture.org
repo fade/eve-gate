@@ -1,0 +1,392 @@
+#+TITLE: Architecture Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Architecture Guide
+
+This guide describes the internal architecture of eve-gate, including
+module organization, design decisions, and extension points.
+
+[[file:index.org][Back to Index]]
+
+** System Overview
+
+#+begin_example
+┌─────────────────────────────────────────────────────────────┐
+│                      eve-gate (main)                        │
+│  High-level client interface, convenience methods           │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│                      eve-gate.api                           │
+│  195 generated endpoint functions, endpoint registry        │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       │                     │                     │
+       ▼                     ▼                     ▼
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  eve-gate   │      │  eve-gate   │      │  eve-gate   │
+│    .auth    │      │   .cache    │      │ .concurrent │
+│ OAuth 2.0   │      │ Multi-tier  │      │ Rate limit  │
+│ Token mgmt  │      │ ETag cache  │      │ Bulk ops    │
+└──────┬──────┘      └──────┬──────┘      └──────┬──────┘
+       │                    │                    │
+       └─────────────────────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────┐
+│                      eve-gate.core                          │
+│  HTTP client, middleware pipeline, conditions               │
+└────────────────────────────┬───────────────────────────────┘
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       ▼                     ▼                     ▼
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  eve-gate   │      │  eve-gate   │      │  External   │
+│   .types    │      │   .utils    │      │  (dexador,  │
+│ ID types    │      │ Logging,    │      │   jzon,     │
+│ Validation  │      │ Config,     │      │   ciao)     │
+└─────────────┘      │ Monitoring  │      └─────────────┘
+                     └─────────────┘
+#+end_example
+
+** Module Descriptions
+
+*** eve-gate (Main Package)
+
+The primary entry point for users.
+
+*Responsibilities:*
+- High-level client creation (=make-eve-client=)
+- Convenience wrappers for common operations
+- Client lifecycle management
+
+*Key Components:*
+- =eve-client= class - Main client object
+- =make-eve-client= - Client factory function
+- =with-client= macro - Scoped client usage
+- =authenticate-client= - OAuth flow helper
+
+*** eve-gate.api
+
+Generated API functions and endpoint management.
+
+*Responsibilities:*
+- 195 generated ESI endpoint functions
+- Endpoint registry and introspection
+- Parameter validation and coercion
+- Response type handling
+
+*Key Components:*
+- =api-client= struct - Low-level API client
+- Generated functions (=get-characters-character-id=, etc.)
+- =*endpoint-registry*= - Endpoint metadata
+- =api-call= - Generic operation-id based calls
+
+*Code Generation:*
+Functions are generated from the ESI OpenAPI specification at build time.
+The generator creates one file per API category in =src/api/generated/=.
+
+*** eve-gate.auth
+
+OAuth 2.0 authentication with EVE SSO.
+
+*Responsibilities:*
+- OAuth 2.0 authorization code flow
+- Token acquisition and refresh
+- Token state management
+- Scope validation
+
+*Key Components:*
+- =oauth-client= struct - OAuth configuration
+- =token-manager= - Token lifecycle management
+- Scope registry and validation functions
+- SSO-specific error conditions
+
+*Design Notes:*
+Built on the CIAO OAuth 2.0 library. Token state is managed separately
+from immutable OAuth configuration.
+
+*** eve-gate.cache
+
+Multi-tier caching system.
+
+*Responsibilities:*
+- In-memory caching with LRU eviction
+- ETag-based conditional requests
+- TTL management and expiration
+- Cache key generation
+
+*Key Components:*
+- =memory-cache= struct - Fast in-process cache
+- =cache-manager= - Unified cache interface
+- =etag-cache= - ETag storage and lookup
+- Cache policy functions
+
+*Design Notes:*
+Designed for extension - file-based and database caches can be added
+as additional tiers.
+
+*** eve-gate.concurrent
+
+Rate limiting and parallel operations.
+
+*Responsibilities:*
+- Token bucket rate limiting
+- Request queuing when rate limited
+- Bulk/parallel request execution
+- Concurrency control
+
+*Key Components:*
+- =token-bucket= struct - Rate limiter
+- =esi-rate-limiter= - ESI-specific multi-bucket limiter
+- Bulk operation functions
+- Worker pool management
+
+*Design Notes:*
+Uses token bucket algorithm matching ESI's rate limit behavior.
+Per-endpoint and per-character buckets provide fine-grained control.
+
+*** eve-gate.core
+
+HTTP client and foundational components.
+
+*Responsibilities:*
+- HTTP request/response handling
+- Middleware pipeline
+- Error conditions and handling
+- Response parsing
+
+*Key Components:*
+- =http-client= struct - HTTP configuration
+- Middleware system (=make-middleware=, =make-middleware-stack=)
+- ESI error condition hierarchy
+- =esi-response= struct
+
+*Middleware Pipeline:*
+Requests flow through middleware in priority order:
+1. Headers middleware (adds standard ESI headers)
+2. Auth middleware (adds Bearer token)
+3. Rate limit middleware (acquires tokens)
+4. Retry middleware (handles transient failures)
+5. (actual HTTP request via dexador)
+6. Response processing middleware (reverse order)
+
+*** eve-gate.types
+
+EVE Online entity types and validation.
+
+*Responsibilities:*
+- Type definitions for EVE IDs
+- Input validation
+- Type conversion utilities
+
+*Key Components:*
+- Type definitions (=character-id=, =corporation-id=, etc.)
+- Validation functions (=validate-character-id=, etc.)
+- Conversion utilities (=parse-esi-timestamp=, etc.)
+
+*** eve-gate.utils
+
+Cross-cutting utilities.
+
+*Responsibilities:*
+- Structured logging
+- Configuration management
+- Health monitoring
+- Performance utilities
+
+*Key Components:*
+- Logging (=log-info=, =log-warn=, =log-error=)
+- Config manager (=load-config=, =config-get=)
+- Health checks (=quick-health=, =health-report=)
+- Performance tools (string interning, object pools)
+
+** Design Principles
+
+*** Functional Core, Imperative Shell
+
+Pure functions at the core with I/O at the boundaries:
+
+#+begin_src lisp
+;; Pure: validates and transforms data
+(defun validate-character-id (id)
+  (and (integerp id) (< 0 id (expt 2 32))))
+
+;; Impure: performs I/O (at the boundary)
+(defun fetch-character (client id)
+  (http-request client (format nil "/characters/~A/" id)))
+#+end_src
+
+*** Middleware Architecture
+
+Request/response processing is composable:
+
+#+begin_src lisp
+(defvar *default-stack*
+  (make-middleware-stack
+   (make-headers-middleware)      ; Priority 10
+   (make-auth-middleware)         ; Priority 20
+   (make-rate-limit-middleware)   ; Priority 30
+   (make-retry-middleware)))      ; Priority 40
+
+;; Easy to extend
+(add-middleware *stack* (make-logging-middleware) :priority 5)
+#+end_src
+
+*** Condition-Based Error Handling
+
+Rich error hierarchy using CL conditions:
+
+#+begin_src lisp
+(define-condition esi-error (error)
+  ((message :initarg :message :reader esi-error-message)
+   (status-code :initarg :status-code :reader esi-error-status-code)))
+
+(define-condition esi-not-found (esi-client-error)
+  ()
+  (:default-initargs :status-code 404))
+#+end_src
+
+*** Struct-Based Data
+
+Prefer structs for performance-critical data:
+
+#+begin_src lisp
+(defstruct (token-bucket (:constructor %make-token-bucket))
+  (name "default" :type string)
+  (max-tokens 150.0 :type single-float)
+  (refill-rate 50.0 :type single-float)
+  (tokens 150.0 :type single-float)
+  (last-update (get-universal-time) :type integer))
+#+end_src
+
+** Code Generation
+
+*** API Function Generation
+
+API functions are generated from the ESI OpenAPI specification:
+
+1. Fetch spec from =https://esi.evetech.net/latest/swagger.json=
+2. Process each endpoint definition
+3. Generate function with:
+   - Proper parameter handling
+   - Input validation
+   - HTTP request construction
+   - Response parsing
+
+Generated files:
+- =src/api/generated/characters.lisp=
+- =src/api/generated/corporations.lisp=
+- etc.
+
+*** Regenerating API Functions
+
+When ESI updates:
+
+#+begin_src lisp
+(eve-gate.api:generate-api-functions
+ (eve-gate.api:fetch-and-process-esi-spec))
+#+end_src
+
+** Extension Points
+
+*** Custom Middleware
+
+#+begin_src lisp
+(defun make-my-middleware ()
+  (make-middleware
+   :name :my-middleware
+   :priority 25
+   :request-fn (lambda (ctx)
+                 ;; Modify request context
+                 (setf (getf ctx :custom-header) "value")
+                 ctx)
+   :response-fn (lambda (response ctx)
+                  ;; Process response
+                  (log-response response)
+                  response)))
+#+end_src
+
+*** Custom Cache Backend
+
+#+begin_src lisp
+(defclass redis-cache ()
+  ((connection :initarg :connection :accessor cache-connection)))
+
+(defmethod cache-get ((cache redis-cache) key)
+  (redis:get (cache-connection cache) key))
+
+(defmethod cache-put ((cache redis-cache) key value &key ttl)
+  (redis:setex (cache-connection cache) key ttl value))
+#+end_src
+
+*** Custom Rate Limiter
+
+#+begin_src lisp
+(defclass adaptive-rate-limiter ()
+  ((base-rate :initarg :base-rate)
+   (current-rate :accessor current-rate)
+   (error-count :initform 0)))
+
+(defmethod rate-limit-acquire ((limiter adaptive-rate-limiter) &key path)
+  ;; Adjust rate based on error history
+  (when (> (slot-value limiter 'error-count) 10)
+    (setf (current-rate limiter) 
+          (* 0.5 (slot-value limiter 'base-rate))))
+  (call-next-method))
+#+end_src
+
+** Performance Considerations
+
+*** Hot Paths
+
+Optimized code paths:
+- Cache key generation (=fast-cache-key=)
+- String interning for repeated values
+- Object pools for frequently allocated objects
+- Efficient hash table operations
+
+*** Memory Management
+
+- LRU cache eviction prevents unbounded growth
+- Object pools reduce allocation pressure
+- Weak references for optional caching
+
+*** Concurrency
+
+- Thread-safe cache operations (with locks)
+- Lock-free token bucket where possible
+- Connection pooling in HTTP client
+
+** Testing Architecture
+
+*** Test Organization
+
+#+begin_example
+test/
+├── core.lisp          # Core component tests
+├── types.lisp         # Type system tests
+├── cache.lisp         # Cache tests
+├── concurrent.lisp    # Concurrency tests
+├── auth.lisp          # Authentication tests
+├── api.lisp           # API function tests
+├── config.lisp        # Configuration tests
+├── integration.lisp   # Component integration tests
+├── live-integration.lisp  # Live ESI tests
+└── performance.lisp   # Performance tests
+#+end_example
+
+*** Test Isolation
+
+- Unit tests don't require network
+- Integration tests use mock data
+- Live tests use Singularity (test server)
+- Performance tests have defined baselines
+
+** Related Documentation
+
+- [[file:api-reference.org][API Reference]] - Public API documentation
+- [[file:configuration.org][Configuration]] - Configuration options
+- [[file:testing.org][Testing]] - Test organization and execution

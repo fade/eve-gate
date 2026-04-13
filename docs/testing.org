@@ -1,0 +1,340 @@
+#+TITLE: Testing Guide
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+* Testing Guide
+
+Eve-gate includes a comprehensive test suite using the Parachute testing
+framework. This guide covers running tests and writing new tests.
+
+[[file:index.org][Back to Index]] | [[file:quickstart.org][Quickstart]]
+
+** Running Tests
+
+*** All Tests
+
+From Lisp:
+
+#+begin_src lisp
+(asdf:test-system :eve-gate)
+#+end_src
+
+From the shell:
+
+#+begin_src sh
+make test
+#+end_src
+
+*** Individual Test Modules
+
+#+begin_src sh
+make test-core        # Core conditions and middleware
+make test-types       # Type system tests
+make test-cache       # Caching tests
+make test-concurrent  # Concurrency tests
+make test-auth        # Authentication tests
+make test-api         # API function tests
+make test-config      # Configuration tests
+make test-integration # Integration tests
+#+end_src
+
+Or from Lisp:
+
+#+begin_src lisp
+(ql:quickload :eve-gate/test/all)
+(parachute:test :eve-gate/test/core)
+(parachute:test :eve-gate/test/cache)
+;; etc.
+#+end_src
+
+** Test Categories
+
+*** Unit Tests (453 tests)
+
+Located in =test/=, these test individual components in isolation:
+
+| File                | Tests | Description                        |
+|---------------------+-------+------------------------------------|
+| =test/core.lisp=      |    10 | Conditions, middleware             |
+| =test/types.lisp=     |    13 | Type predicates, validation        |
+| =test/cache.lisp=     |    13 | Memory cache, ETag, policies       |
+| =test/concurrent.lisp=|     8 | Token bucket, request queue        |
+| =test/auth.lisp=      |    17 | OAuth, scopes, token state         |
+| =test/api.lisp=       |    18 | Naming, coercion, schema           |
+| =test/config.lisp=    |    22 | Schema, validation, environments   |
+| =test/integration.lisp=|   17 | Component interactions             |
+
+*** Live Integration Tests (20 tests)
+
+Tests against real ESI API (requires network):
+
+#+begin_src sh
+make test-live
+#+end_src
+
+#+begin_src lisp
+(ql:quickload :eve-gate/test/live)
+(eve-gate/test/live-integration:run-live-tests)
+#+end_src
+
+These tests use the *Singularity test server* by default to avoid impacting
+production.
+
+*** Performance Tests (17 tests)
+
+Automated performance regression tests:
+
+#+begin_src sh
+make test-performance
+#+end_src
+
+#+begin_src lisp
+(ql:quickload :eve-gate/test/performance)
+(eve-gate/test/performance:run-performance-tests)
+#+end_src
+
+*** Benchmarks
+
+Detailed performance analysis:
+
+#+begin_src sh
+make bench
+#+end_src
+
+#+begin_src lisp
+(ql:quickload :eve-gate/dev)
+(eve-gate.dev.benchmarks:run-all-benchmarks)
+#+end_src
+
+** Test Structure
+
+*** Example Test File
+
+#+begin_src lisp
+;;;; test/my-feature.lisp
+
+(uiop:define-package #:eve-gate/test/my-feature
+  (:use #:cl)
+  (:import-from #:eve-gate.my-module
+                #:my-function
+                #:my-class)
+  (:local-nicknames (#:t #:parachute)))
+
+(in-package #:eve-gate/test/my-feature)
+
+(t:define-test my-function-basic
+  "Test basic my-function behavior"
+  (let ((result (my-function "input")))
+    (t:true (stringp result))
+    (t:is string= "expected" result)))
+
+(t:define-test my-function-edge-cases
+  "Test edge cases"
+  (t:is eq nil (my-function nil))
+  (t:is string= "" (my-function "")))
+
+(t:define-test my-function-errors
+  "Test error conditions"
+  (t:fail (my-function :invalid) 'type-error))
+#+end_src
+
+*** Parachute Assertions
+
+#+begin_src lisp
+;; Truth assertions
+(t:true expr)          ; expr is truthy
+(t:false expr)         ; expr is NIL
+
+;; Equality
+(t:is predicate expected actual)
+(t:is = 42 (compute-value))
+(t:is string= "hello" (get-greeting))
+(t:is equalp expected-list actual-list)
+
+;; Inequality
+(t:isnt = 0 (count-items))
+
+;; Type checking
+(t:of-type string (get-name))
+(t:of-type hash-table (get-data))
+
+;; Error handling
+(t:fail (error-prone-fn) 'expected-error-type)
+(t:finish (should-not-error))  ; No error expected
+#+end_src
+
+** Writing Tests
+
+*** Guidelines
+
+1. *One assertion per concept* - Test one thing at a time
+2. *Descriptive names* - Test name should describe what's tested
+3. *Independent tests* - Tests shouldn't depend on each other
+4. *Fast execution* - Unit tests should be fast
+5. *No network* - Unit tests shouldn't require network (use live tests for that)
+
+*** Testing API Functions
+
+#+begin_src lisp
+(t:define-test api-function-validation
+  "Test API function parameter validation"
+  ;; Valid parameters work
+  (t:finish
+   (eve-gate.api:validate-params
+    '(:character-id 95465499)))
+  
+  ;; Invalid parameters fail
+  (t:fail
+   (eve-gate.api:validate-params
+    '(:character-id -1))
+   'eve-gate.core:esi-bad-request))
+#+end_src
+
+*** Testing with Mocks
+
+#+begin_src lisp
+(t:define-test cached-response
+  "Test cache returns stored response"
+  (let ((cache (eve-gate.cache:make-memory-cache)))
+    ;; Store mock response
+    (eve-gate.cache:memory-cache-put cache "key" 
+      '(:status 200 :body "test"))
+    
+    ;; Verify retrieval
+    (let ((result (eve-gate.cache:memory-cache-get cache "key")))
+      (t:is = 200 (getf result :status))
+      (t:is string= "test" (getf result :body)))))
+#+end_src
+
+*** Testing Error Conditions
+
+#+begin_src lisp
+(t:define-test error-condition-signaled
+  "Test that appropriate error is signaled"
+  (t:fail
+   (eve-gate.api:get-characters-character-id 
+    *mock-client* :character-id -1)
+   'eve-gate.core:esi-bad-request))
+
+(t:define-test error-contains-details
+  "Test error condition has expected details"
+  (handler-case
+      (eve-gate.api:get-characters-character-id 
+       *mock-client* :character-id -1)
+    (eve-gate.core:esi-bad-request (c)
+      (t:true (eve-gate.core:esi-error-message c))
+      (t:is = 400 (eve-gate.core:esi-error-status-code c)))))
+#+end_src
+
+** Test Configuration
+
+*** Test-Only Configuration
+
+#+begin_src lisp
+(t:define-test with-test-config
+  "Test with specific configuration"
+  (let ((eve-gate.utils:*config* 
+         '(:cache-enabled nil :log-level :error)))
+    ;; Test with this config
+    (t:false (eve-gate.utils:config-get :cache-enabled))))
+#+end_src
+
+*** Singularity vs Tranquility
+
+Live tests default to Singularity. To test against production:
+
+#+begin_src lisp
+;; NOT recommended for regular testing
+(eve-gate/test/live-integration:run-live-tests 
+ :datasource "tranquility")
+#+end_src
+
+** Performance Testing
+
+*** Performance Test Example
+
+#+begin_src lisp
+(t:define-test cache-get-performance
+  "Cache GET should be < 50μs average"
+  (let ((cache (make-memory-cache :max-entries 10000)))
+    ;; Pre-populate
+    (dotimes (i 1000)
+      (memory-cache-put cache (format nil "key-~D" i) "value"))
+    
+    ;; Measure
+    (let ((avg-us (measure-average-time (:iterations 10000)
+                    (memory-cache-get cache "key-500"))))
+      (t:true (< avg-us 50)
+              "Expected < 50μs, got ~,2Fμs" avg-us))))
+#+end_src
+
+*** Performance Baselines
+
+| Operation               | Target    |
+|-------------------------+-----------|
+| Cache GET (hit)         | < 50μs    |
+| Cache PUT               | < 100μs   |
+| Cache key generation    | < 20μs    |
+| Middleware pipeline     | < 50μs    |
+| Token bucket acquire    | < 5μs     |
+| HTTP client creation    | < 1ms     |
+
+** Continuous Integration
+
+*** GitHub Actions Example
+
+#+begin_src yaml
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install SBCL
+        run: sudo apt-get install -y sbcl
+        
+      - name: Install Quicklisp
+        run: |
+          curl -O https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --load quicklisp.lisp \
+               --eval '(quicklisp-quickstart:install)' \
+               --eval '(quit)'
+               
+      - name: Run Tests
+        run: make test
+#+end_src
+
+** Debugging Tests
+
+*** Verbose Output
+
+#+begin_src lisp
+(parachute:test :eve-gate/test/core :report 'parachute:interactive)
+#+end_src
+
+*** Run Single Test
+
+#+begin_src lisp
+(parachute:test 'eve-gate/test/core::my-specific-test)
+#+end_src
+
+*** Test in REPL
+
+#+begin_src lisp
+;; Load test package
+(ql:quickload :eve-gate/test/all)
+(in-package :eve-gate/test/core)
+
+;; Run test code directly
+(let ((result (make-esi-error :message "test")))
+  (format t "Result: ~A~%" result))
+#+end_src
+
+** Related Documentation
+
+- [[file:quickstart.org][Quickstart]] - Basic setup
+- [[file:api-reference.org][API Reference]] - Functions to test
+- [[file:error-handling.org][Error Handling]] - Testing error conditions
