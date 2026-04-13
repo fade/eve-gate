@@ -60,10 +60,12 @@
                (:module "cache"
                 :depends-on ("packages" "utils" "types" "core")
                 :components
-                ((:file "etag-cache")
-                 (:file "memory-cache")
+                ((:file "memory-cache")
+                 (:file "etag-cache")
                  (:file "database-cache")
-                 (:file "cache-manager")))
+                 (:file "policies" :depends-on ("memory-cache" "etag-cache" "database-cache"))
+                 (:file "cache-manager" :depends-on ("memory-cache" "etag-cache"
+                                                     "database-cache" "policies"))))
                
                  ;; API generation and endpoints
                  (:module "api"

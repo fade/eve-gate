@@ -580,32 +580,141 @@
 
 (defpackage #:eve-gate.cache  
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core)
+  (:import-from #:bordeaux-threads)
+  (:import-from #:com.inuoe.jzon)
+  (:import-from #:local-time)
   (:export
-   ;; Cache protocols
+   ;; --- Cache entry (memory-cache.lisp) ---
+   #:cache-entry
+   #:make-cache-entry
+   #:cache-entry-key
+   #:cache-entry-value
+   #:cache-entry-etag
+   #:cache-entry-expires-at
+   #:cache-entry-created-at
+   #:cache-entry-accessed-at
+   #:cache-entry-access-count
+   #:cache-entry-expired-p
+   #:cache-entry-ttl-remaining
+
+   ;; --- Memory cache (memory-cache.lisp) ---
+   #:memory-cache
+   #:make-memory-cache
+   #:memory-cache-get
+   #:memory-cache-put
+   #:memory-cache-delete
+   #:memory-cache-exists-p
+   #:memory-cache-clear
+   #:memory-cache-count
+   #:memory-cache-statistics
+   #:memory-cache-purge-expired
+   #:memory-cache-get-multi
+   #:memory-cache-keys
+   #:memory-cache-summary
+
+   ;; --- ETag cache (etag-cache.lisp) ---
+   #:etag-cache
+   #:make-etag-cache
+   #:etag-cache-get
+   #:etag-cache-put
+   #:etag-cache-record-result
+   #:etag-cache-delete
+   #:etag-cache-clear
+   #:etag-cache-count
+   #:etag-cache-statistics
+   #:etag-cache-summary
+
+   ;; --- Database cache (database-cache.lisp) ---
+   #:database-cache
+   #:make-database-cache
+   #:database-cache-get
+   #:database-cache-put
+   #:database-cache-delete
+   #:database-cache-exists-p
+   #:database-cache-clear
+   #:database-cache-statistics
+   #:database-cache-purge-expired
+   #:database-cache-summary
+   #:*database-cache-directory*
+
+   ;; --- Cache policies (policies.lisp) ---
+   ;; Policy struct
+   #:cache-policy
+   #:make-cache-policy
+   #:cache-policy-name
+   #:cache-policy-ttl
+   #:cache-policy-use-etag-p
+   #:cache-policy-cache-in-memory-p
+   #:cache-policy-cache-in-db-p
+   #:cache-policy-priority
+   #:cache-policy-invalidate-on-write-p
+   #:cache-policy-stale-while-revalidate
+
+   ;; Pre-defined policies
+   #:*policy-volatile*
+   #:*policy-short*
+   #:*policy-standard*
+   #:*policy-long*
+   #:*policy-static*
+   #:*policy-no-cache*
+
+   ;; Policy configuration
+   #:*category-policy-map*
+   #:*endpoint-policy-overrides*
+   #:get-cache-policy
+   #:set-endpoint-policy
+   #:set-category-policy
+   #:cacheable-request-p
+
+   ;; TTL computation
+   #:compute-ttl-from-headers
+   #:parse-cache-control-max-age
+
+   ;; Cache key generation
+   #:make-cache-key
+   #:extract-auth-context-from-params
+
+   ;; Write invalidation
+   #:*write-invalidation-rules*
+   #:get-invalidation-targets
+
+   ;; Policy introspection
+   #:list-all-policies
+   #:policy-summary
+   #:endpoint-policy-summary
+
+   ;; --- Cache manager (cache-manager.lisp) ---
+   #:cache-manager
+   #:make-cache-manager
+   #:cache-manager-memory-cache
+   #:cache-manager-database-cache
+   #:cache-manager-etag-cache
+   #:cache-manager-enabled-p
+
+   ;; Core operations
    #:cache-get
    #:cache-put
    #:cache-delete
    #:cache-exists-p
    #:cache-clear
-   
-   ;; ETag caching
-   #:etag-cache
-   #:make-etag-cache
-   #:etag-cache-get
-   #:etag-cache-put
-   
-   ;; Memory cache
-   #:memory-cache
-   #:make-memory-cache
-   
-   ;; Database cache
-   #:database-cache
-   #:make-database-cache
-   
-   ;; Cache manager
-   #:cache-manager
-   #:make-cache-manager
-   #:with-caching))
+
+   ;; High-level interface
+   #:cache-lookup
+   #:cache-store
+   #:invalidate-for-write
+   #:invalidate-by-operation
+
+   ;; Middleware
+   #:make-cache-middleware
+
+   ;; WITH-CACHING macro
+   #:with-caching
+
+   ;; Statistics and monitoring
+   #:cache-statistics
+   #:cache-hit-rate
+   #:cache-purge-expired
+   #:cache-summary))
 
 (defpackage #:eve-gate.api
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core 
