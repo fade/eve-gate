@@ -1,0 +1,445 @@
+#+TITLE: Eve-Gate
+#+AUTHOR: Brian O'Reilly
+#+OPTIONS: toc:t num:nil
+
+A comprehensive EVE Online ESI (EVE Swagger Interface) API client library for
+Common Lisp. Eve-gate provides auto-generated API bindings for all 195 ESI
+endpoints, OAuth 2.0 authentication, multi-tier caching with ETag support,
+rate limiting, and parallel request execution.
+
+* Features
+
+- *195 Generated API Functions*: Complete coverage of ESI endpoints across 20 categories
+- *OAuth 2.0 Authentication*: Browser-based EVE SSO login with automatic token refresh
+- *Multi-tier Caching*: Memory + file-based persistence with ETag revalidation
+- *Rate Limiting*: Token bucket algorithm respecting ESI's floating window limits
+- *Parallel Execution*: Concurrent request engine with bulk operations support
+- *Type Safety*: Comprehensive type system for EVE Online entity IDs
+- *Structured Logging*: JSON and text formatters with request correlation
+- *Health Monitoring*: System health checks, SLA monitoring, and alerting
+
+* Requirements
+
+| Requirement        | Notes                                                  |
+|--------------------+--------------------------------------------------------|
+| SBCL               | Tested on current releases; other implementations may work |
+| Quicklisp          | For library loading                                    |
+| EVE Developer App  | Register at [[https://developers.eveonline.com/]]         |
+
+Dependencies (fetched via Quicklisp/ASDF):
+
+- =dexador= - HTTP client
+- =com.inuoe.jzon= - JSON processing  
+- =alexandria= - Common utilities
+- =local-time= - Time handling
+- =bordeaux-threads= - Thread synchronization
+- =lparallel= - Parallel processing
+- =ciao= - OAuth 2.0 client
+
+* Quickstart
+
+** 1. Install the library
+
+#+begin_src sh
+cd ~/common-lisp/  # Or your ASDF source registry path
+git clone https://github.com/fade/eve-gate.git
+#+end_src
+
+** 2. Load and create a client
+
+#+begin_src lisp
+(ql:quickload :eve-gate)
+(in-package :eve-gate)
+
+;; For public (unauthenticated) endpoints
+(defvar *client* (make-eve-client))
+
+;; For authenticated endpoints, you need OAuth credentials
+(defvar *auth-client* 
+  (make-eve-client :client-id "your-client-id"
+                   :client-secret "your-client-secret"
+                   :redirect-uri "http://localhost:29170/oauth/callback"))
+#+end_src
+
+** 3. Make API calls
+
+#+begin_src lisp
+;; Public endpoint: get server status
+(eve-gate.api:get-status *client*)
+;; => #<HASH-TABLE :COUNT 4>
+;;    "players" -> 31234
+;;    "server_version" -> "2162163"
+;;    "start_time" -> "2026-04-13T11:00:00Z"
+;;    "vip" -> NIL
+
+;; Public endpoint: get character info
+(eve-gate.api:get-characters-character-id *client* :character-id 95465499)
+;; => #<HASH-TABLE> with name, corporation_id, birthday, etc.
+
+;; Get multiple characters in parallel
+(eve-gate.api:get-alliances *client*)
+;; => #(99010079 99010193 99010194 ...)  ; Vector of alliance IDs
+
+;; Paginated endpoint with type info
+(eve-gate.api:get-universe-types *client* :page 1)
+;; => #(0 1 2 3 ...) ; page of type IDs
+#+end_src
+
+** 4. Authenticate for private endpoints
+
+#+begin_src lisp
+;; Generate authorization URL and open in browser
+(let ((url (eve-gate.auth:get-authorization-url 
+            (eve-client-auth-client *auth-client*)
+            :scopes '("esi-wallet.read_character_wallet.v1"
+                      "esi-skills.read_skills.v1"))))
+  (format t "Visit: ~A~%" url))
+
+;; After user authorizes, exchange the code for tokens
+(let ((auth-code "code-from-callback-url"))
+  (authenticate-client *auth-client* auth-code))
+
+;; Now authenticated endpoints work
+(eve-gate.api:get-characters-character-id-wallet *auth-client* 
+                                                  :character-id 95465499)
+#+end_src
+
+* Running the Tests
+
+#+begin_src lisp
+(asdf:test-system :eve-gate)
+#+end_src
+
+Or via Make:
+
+#+begin_src sh
+make test           # Run all tests
+make test-core      # Test core module only
+make test-cache     # Test cache module only
+make test-api       # Test API module only
+#+end_src
+
+The test suite has 453 tests covering core conditions, types, caching,
+concurrency, authentication, API validation, configuration, and integration.
+
+* API Reference
+
+Eve-gate organizes functionality into several packages:
+
+** eve-gate (Main Package)
+
+High-level client interface.
+
+| Symbol              | Type     | Description                          |
+|---------------------+----------+--------------------------------------|
+| =make-eve-client=     | function | Create configured EVE client         |
+| =eve-client=          | class    | Main client object                   |
+| =with-client=         | macro    | Execute with temporary client        |
+| =authenticate-client= | function | Authenticate with OAuth code         |
+| =configure-client=    | function | Runtime configuration updates        |
+
+** eve-gate.api (API Functions)
+
+195 generated ESI endpoint functions plus utilities.
+
+#+begin_src lisp
+;; Pattern: HTTP-METHOD-PATH-SEGMENTS
+(get-characters-character-id client :character-id 12345)
+(get-characters-character-id-wallet client :character-id 12345)
+(post-characters-affiliation client :characters '(123 456 789))
+
+;; All functions accept:
+;;   CLIENT - api-client or http-client
+;;   Keyword args matching endpoint parameters
+;;   :token - Optional override OAuth token
+;;   :datasource - "tranquility" (default) or "singularity"
+#+end_src
+
+Key utilities:
+
+| Symbol            | Type     | Description                              |
+|-------------------+----------+------------------------------------------|
+| =make-api-client=   | function | Create API client                        |
+| =api-call=          | function | Generic call by operation-id             |
+| =api-get/post/put/delete= | function | HTTP verb convenience methods      |
+| =find-endpoint=     | function | Look up endpoint metadata                |
+| =list-endpoints=    | function | List endpoints by category               |
+
+** eve-gate.auth (Authentication)
+
+OAuth 2.0 with EVE SSO.
+
+| Symbol                   | Type      | Description                        |
+|--------------------------+-----------+------------------------------------|
+| =make-oauth-client=        | function  | Create OAuth client                |
+| =get-authorization-url=    | function  | Generate SSO login URL             |
+| =exchange-code-for-token=  | function  | Exchange auth code for tokens      |
+| =refresh-access-token=     | function  | Refresh expired token              |
+| =make-token-manager=       | function  | Create auto-refreshing manager     |
+| =valid-scope-p=            | function  | Check if scope is valid            |
+| =scopes-by-category=       | function  | List scopes by category            |
+
+** eve-gate.cache (Caching)
+
+Multi-tier caching with ETag support.
+
+| Symbol               | Type     | Description                           |
+|----------------------+----------+---------------------------------------|
+| =make-cache-manager=   | function | Create cache manager                  |
+| =cache-get/put/delete= | function | Basic cache operations                |
+| =with-caching=         | macro    | Execute with automatic caching        |
+| =cache-summary=        | function | REPL-friendly cache statistics        |
+| =cache-purge-expired=  | function | Remove expired entries                |
+
+** eve-gate.core (Core HTTP)
+
+HTTP client and middleware.
+
+| Symbol                  | Type     | Description                         |
+|-------------------------+----------+-------------------------------------|
+| =make-http-client=        | function | Create HTTP client                  |
+| =http-request=            | function | Make HTTP request                   |
+| =make-middleware=         | function | Create middleware component         |
+| =make-default-middleware-stack= | function | Standard middleware stack     |
+| =esi-error=               | condition | Base ESI error condition            |
+| =esi-rate-limit-exceeded= | condition | Rate limit error                    |
+
+** eve-gate.types (Type System)
+
+EVE Online entity types and validation.
+
+| Symbol                | Type     | Description                          |
+|-----------------------+----------+--------------------------------------|
+| =character-id=          | type     | Character ID (32-bit)                |
+| =corporation-id=        | type     | Corporation ID (32-bit)              |
+| =alliance-id=           | type     | Alliance ID (32-bit)                 |
+| =type-id=               | type     | Item type ID (32-bit)                |
+| =structure-id=          | type     | Structure ID (64-bit)                |
+| =validate-character-id= | function | Validate character ID                |
+| =parse-esi-timestamp=   | function | Parse ESI timestamp string           |
+
+** eve-gate.concurrent (Parallel Operations)
+
+Rate limiting and bulk operations.
+
+| Symbol                | Type     | Description                          |
+|-----------------------+----------+--------------------------------------|
+| =make-token-bucket=     | function | Create rate limiter                  |
+| =bulk-get=              | function | Parallel GET requests                |
+| =bulk-operations=       | function | Execute bulk operations              |
+| =with-rate-limiting=    | macro    | Execute with rate limiting           |
+
+** eve-gate.utils (Utilities)
+
+Logging, configuration, and monitoring.
+
+| Symbol                      | Type     | Description                      |
+|-----------------------------+----------+----------------------------------|
+| =log-info/warn/error=         | function | Structured logging               |
+| =initialize-config-manager=   | function | Initialize configuration         |
+| =config-get=                  | function | Get configuration value          |
+| =initialize-health-monitoring= | function | Start health monitoring         |
+| =quick-health=                | function | Quick system health check        |
+
+* Configuration
+
+Eve-gate supports multiple configuration sources with precedence:
+
+1. Environment variables (highest)
+2. JSON/Lisp config files  
+3. Programmatic defaults (lowest)
+
+** Environment Variables
+
+| Variable                | Description                              |
+|-------------------------+------------------------------------------|
+| =EVE_GATE_CLIENT_ID=      | OAuth client ID                          |
+| =EVE_GATE_CLIENT_SECRET=  | OAuth client secret                      |
+| =EVE_GATE_LOG_LEVEL=      | Log level (trace/debug/info/warn/error) |
+| =EVE_GATE_CACHE_ENABLED=  | Enable caching (true/false)              |
+| =EVE_GATE_DATASOURCE=     | ESI datasource (tranquility/singularity) |
+
+** Configuration File
+
+#+begin_src lisp
+;; ~/.config/eve-gate/config.lisp
+(:http-timeout 30
+ :http-retries 3
+ :cache-enabled t
+ :cache-default-ttl 300
+ :log-level :info
+ :worker-threads 4)
+#+end_src
+
+** Programmatic Configuration
+
+#+begin_src lisp
+(eve-gate.utils:initialize-config-manager 
+ :environment :development
+ :sources (list (eve-gate.utils:make-env-source)
+                (eve-gate.utils:make-file-source "~/.config/eve-gate/config.lisp")))
+#+end_src
+
+* Architecture
+
+#+begin_example
+┌─────────────────────────────────────────────────────────────┐
+│                      eve-gate (main)                        │
+│  High-level client interface, convenience methods           │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│                      eve-gate.api                           │
+│  195 generated endpoint functions, endpoint registry        │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       │                     │                     │
+       ▼                     ▼                     ▼
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  eve-gate   │      │  eve-gate   │      │  eve-gate   │
+│    .auth    │      │   .cache    │      │ .concurrent │
+│ OAuth 2.0   │      │ Multi-tier  │      │ Rate limit  │
+│ Token mgmt  │      │ ETag cache  │      │ Bulk ops    │
+└──────┬──────┘      └──────┬──────┘      └──────┬──────┘
+       │                    │                    │
+       └─────────────────────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────┐
+│                      eve-gate.core                          │
+│  HTTP client, middleware pipeline, conditions               │
+└────────────────────────────┬───────────────────────────────┘
+                             │
+       ┌─────────────────────┼─────────────────────┐
+       ▼                     ▼                     ▼
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  eve-gate   │      │  eve-gate   │      │  External   │
+│   .types    │      │   .utils    │      │  (dexador,  │
+│ ID types    │      │ Logging,    │      │   jzon,     │
+│ Validation  │      │ Config,     │      │   ciao)     │
+└─────────────┘      │ Monitoring  │      └─────────────┘
+                     └─────────────┘
+#+end_example
+
+* ESI Scope Categories
+
+Eve-gate provides 65 scopes organized by category:
+
+| Category    | Count | Examples                                    |
+|-------------+-------+---------------------------------------------|
+| Character   |    25 | =esi-characters.read_*=, =esi-skills.*=         |
+| Corporation |    18 | =esi-corporations.read_*=, =esi-industry.*=     |
+| Wallet      |     4 | =esi-wallet.read_character_wallet.v1=          |
+| Assets      |     2 | =esi-assets.read_assets.v1=                    |
+| Mail        |     4 | =esi-mail.*=                                   |
+| Fleets      |     2 | =esi-fleets.*=                                 |
+| UI          |     4 | =esi-ui.*=                                     |
+| Markets     |     2 | =esi-markets.read_*=, =esi-markets.structure_markets.v1= |
+| Other       |     4 | =esi-search.*=, =esi-bookmarks.*=               |
+
+List all scopes:
+
+#+begin_src lisp
+(eve-gate.auth:scopes-by-category)
+(eve-gate.auth:character-scopes)
+(eve-gate.auth:all-read-scopes)
+#+end_src
+
+* Error Handling
+
+Eve-gate uses the Common Lisp condition system for errors:
+
+#+begin_src lisp
+(handler-case 
+    (eve-gate.api:get-characters-character-id *client* :character-id 0)
+  (eve-gate.core:esi-not-found (c)
+    (format t "Character not found: ~A~%" (esi-error-message c)))
+  (eve-gate.core:esi-rate-limit-exceeded (c)
+    (format t "Rate limited, retry after ~A seconds~%" 
+            (esi-rate-limit-retry-after c)))
+  (eve-gate.core:esi-error (c)
+    (format t "ESI error ~A: ~A~%" 
+            (esi-error-status-code c)
+            (esi-error-message c))))
+#+end_src
+
+Condition hierarchy:
+
+- =esi-condition= (base)
+  - =esi-deprecation-warning= (warning)
+  - =esi-error= (error base)
+    - =esi-client-error= (4xx)
+      - =esi-bad-request= (400)
+      - =esi-unauthorized= (401)
+      - =esi-forbidden= (403)
+      - =esi-not-found= (404)
+      - =esi-rate-limit-exceeded= (420)
+    - =esi-server-error= (5xx)
+      - =esi-internal-error= (500)
+      - =esi-bad-gateway= (502)
+      - =esi-service-unavailable= (503)
+      - =esi-gateway-timeout= (504)
+    - =esi-network-error=
+      - =esi-connection-timeout=
+      - =esi-read-timeout=
+
+* Performance Tips
+
+1. *Enable caching*: Reduces API calls significantly for repeated data
+2. *Use bulk operations*: =bulk-get= executes requests in parallel
+3. *Respect rate limits*: Eve-gate handles this automatically, but be mindful
+4. *Reuse clients*: Create one client and reuse it (thread-safe)
+5. *Monitor health*: Use =(quick-health)= to check system state
+
+#+begin_src lisp
+;; Bulk fetch multiple characters efficiently
+(eve-gate.concurrent:bulk-get *client* 
+  '("/characters/12345/" "/characters/67890/" "/characters/11111/"))
+
+;; Check cache effectiveness
+(eve-gate.cache:cache-summary (eve-client-cache-manager *client*))
+#+end_src
+
+* Development
+
+** Running from Source
+
+#+begin_src lisp
+(ql:quickload :eve-gate/dev)
+(in-package :eve-gate)
+
+;; REPL utilities
+(eve-gate.dev:describe-endpoint "get_characters_character_id")
+(eve-gate.dev:benchmark-endpoint *client* 'get-status :iterations 10)
+#+end_src
+
+** Regenerating API Functions
+
+If the ESI spec changes, regenerate the API:
+
+#+begin_src lisp
+(eve-gate.api:generate-api-functions 
+ (eve-gate.api:fetch-and-process-esi-spec))
+#+end_src
+
+* License
+
+GNU Affero General Public License v3.0 or later.
+
+See [[file:LICENSE][LICENSE]] for the full text.
+
+* Contributing
+
+Contributions welcome! Please:
+
+1. Run the test suite before submitting
+2. Follow the existing code style
+3. Include tests for new functionality
+4. Update documentation as needed
+
+* Related Projects
+
+- [[https://esi.evetech.net/ui/][ESI Swagger UI]] - Official API documentation
+- [[https://developers.eveonline.com/][EVE Developers]] - Register applications
+- [[https://github.com/esi/esi-issues][ESI Issues]] - Report API issues to CCP

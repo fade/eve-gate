@@ -154,26 +154,60 @@
                (:file "main" 
                 :depends-on ("packages" "utils" "types" "core" "auth" "cache" "api" "concurrent")))
   
-  :in-order-to ((test-op (test-op "eve-gate/tests"))))
+  :in-order-to ((test-op (test-op "eve-gate/test/all"))))
 
-;; Test system
-(asdf:defsystem #:eve-gate/tests
-  :description "Test suite for eve-gate"
+;; Comprehensive test system
+(asdf:defsystem #:eve-gate/test/all
+  :description "Comprehensive test suite for eve-gate ESI client"
   :author "Brian O'Reilly <fade@deepsky.com>"
   :license "GNU Affero GPL V.3 or later"
   :depends-on (#:eve-gate
-               #:parachute      ; Testing framework
-               #:mockingbird    ; Mocking library
+               #:parachute
                #:alexandria)
-  :pathname "tests/"
-  :serial nil
-  :components (;; Unit tests
-                (:module "unit"
-                 :components
-                 ((:file "test-utils")
-                  (:file "test-characters-api" :depends-on ("test-utils"))
-                  (:file "test-generated-api" :depends-on ("test-utils")))))
-  :perform (test-op (o c) (symbol-call :parachute :test :eve-gate-tests)))
+  :components ((:file "test/core")
+               (:file "test/types")
+               (:file "test/cache")
+               (:file "test/concurrent")
+               (:file "test/auth")
+               (:file "test/api")
+               (:file "test/config")
+               (:file "test/integration"))
+  :perform (test-op (op c)
+             (uiop:symbol-call :parachute :test
+                               '(:eve-gate/test/core
+                                 :eve-gate/test/types
+                                 :eve-gate/test/cache
+                                 :eve-gate/test/concurrent
+                                 :eve-gate/test/auth
+                                 :eve-gate/test/api
+                                 :eve-gate/test/config
+                                 :eve-gate/test/integration))))
+
+;; Live integration tests (require network access to ESI)
+(asdf:defsystem #:eve-gate/test/live
+  :description "Live ESI API integration tests for eve-gate (requires network)"
+  :author "Brian O'Reilly <fade@deepsky.com>"
+  :license "GNU Affero GPL V.3 or later"
+  :depends-on (#:eve-gate
+               #:parachute
+               #:alexandria)
+  :components ((:file "test/live-integration"))
+  :perform (test-op (op c)
+             (uiop:symbol-call :parachute :test
+                               '(:eve-gate/test/live-integration))))
+
+;; Performance tests (automated performance regression tests)
+(asdf:defsystem #:eve-gate/test/performance
+  :description "Performance tests for eve-gate"
+  :author "Brian O'Reilly <fade@deepsky.com>"
+  :license "GNU Affero GPL V.3 or later"
+  :depends-on (#:eve-gate
+               #:parachute
+               #:alexandria)
+  :components ((:file "test/performance"))
+  :perform (test-op (op c)
+             (uiop:symbol-call :parachute :test
+                               '(:eve-gate/test/performance))))
 
 ;; Development system (optional tools)
 (asdf:defsystem #:eve-gate/dev
@@ -181,7 +215,7 @@
   :author "Brian O'Reilly <fade@deepsky.com>"
   :license "GNU Affero GPL V.3 or later"
   :depends-on (#:eve-gate
-               #:eve-gate/tests)
+               #:eve-gate/test/all)
   :pathname "dev/"
   :components ((:file "repl-utils")
                (:file "benchmarks" :depends-on ("repl-utils"))
