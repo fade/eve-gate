@@ -7,11 +7,20 @@
 Welcome to the eve-gate documentation. Eve-gate is a comprehensive EVE Online
 ESI (EVE Swagger Interface) API client library for Common Lisp.
 
+** Important: Application Registration
+
+#+begin_quote
+Eve-gate is a library, not a hosted service. *You must register your own
+EVE Developer application* at [[https://developers.eveonline.com/]] to use
+authenticated endpoints. There is no shared Client ID - each developer
+needs their own credentials. See [[file:authentication.org][Authentication]] for details.
+#+end_quote
+
 ** Documentation Index
 
 *** Getting Started
 - [[file:quickstart.org][Quickstart Guide]] - Installation and first API calls
-- [[file:authentication.org][Authentication]] - OAuth 2.0 and EVE SSO setup
+- [[file:authentication.org][Authentication]] - OAuth 2.0 and EVE SSO setup (*register your app first!*)
 
 *** Core Documentation
 - [[file:api-reference.org][API Reference]] - Complete API function reference

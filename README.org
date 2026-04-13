@@ -24,9 +24,30 @@ rate limiting, and parallel request execution.
 |--------------------+--------------------------------------------------------|
 | SBCL               | Tested on current releases; other implementations may work |
 | Quicklisp          | For library loading                                    |
-| EVE Developer App  | Register at [[https://developers.eveonline.com/]]         |
+| EVE Developer App  | *You must register your own* (see below)               |
 
-Dependencies (fetched via Quicklisp/ASDF):
+** EVE Developer Application Registration
+
+#+begin_quote
+*Important:* Eve-gate is a library, not a hosted service. Every application
+built with eve-gate must register its own EVE Developer application.
+There is no shared Client ID or Client Secret.
+#+end_quote
+
+To use authenticated ESI endpoints, you must:
+
+1. Go to [[https://developers.eveonline.com/]]
+2. Log in with your EVE Online account
+3. Create a new application for *your* project
+4. Set Callback URL to: =http://localhost:29170/oauth/callback=
+5. Select only the ESI scopes your application needs
+6. Note your *Client ID* and *Client Secret*
+7. *Never* share or commit your Client Secret
+
+This registration identifies your application to CCP and is required by
+their terms of service. Each developer/application needs their own credentials.
+
+** Dependencies (fetched via Quicklisp/ASDF)
 
 - =dexador= - HTTP client
 - =com.inuoe.jzon= - JSON processing  
@@ -51,15 +72,18 @@ git clone https://github.com/fade/eve-gate.git
 (ql:quickload :eve-gate)
 (in-package :eve-gate)
 
-;; For public (unauthenticated) endpoints
+;; For public (unauthenticated) endpoints - no registration needed
 (defvar *client* (make-eve-client))
 
-;; For authenticated endpoints, you need OAuth credentials
+;; For authenticated endpoints, use YOUR registered application credentials
+;; (Register at https://developers.eveonline.com/ first!)
 (defvar *auth-client* 
-  (make-eve-client :client-id "your-client-id"
-                   :client-secret "your-client-secret"
+  (make-eve-client :client-id (uiop:getenv "EVE_CLIENT_ID")
+                   :client-secret (uiop:getenv "EVE_CLIENT_SECRET")
                    :redirect-uri "http://localhost:29170/oauth/callback"))
 #+end_src
+
+Note: Store credentials in environment variables, never in source code.
 
 ** 3. Make API calls
 

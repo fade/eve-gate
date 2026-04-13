@@ -21,15 +21,72 @@ EVE SSO uses the OAuth 2.0 authorization code flow:
 5. Access token is used in API requests
 6. When the access token expires, the refresh token obtains a new one
 
-** Setting Up Your Application
+** Important: Register Your Own EVE Developer Application
 
-*** Register at EVE Developers
+#+begin_quote
+*Every application using eve-gate must register its own EVE Developer application.*
+
+Eve-gate is a library, not a service. There is no shared Client ID or Client
+Secret. Each developer building an application with eve-gate must:
+
+1. Register their own application at the EVE Developers portal
+2. Obtain their own Client ID and Client Secret
+3. Configure their own Callback URL
+4. Select the ESI scopes their specific application requires
+
+This is required by CCP's terms of service and ensures that each application
+is properly identified and accountable for its API usage.
+#+end_quote
+
+** Registering Your Application
+
+*** Step 1: Create an EVE Developer Account
 
 1. Go to [[https://developers.eveonline.com/]]
-2. Create a new application
-3. Note your *Client ID* and *Client Secret*
-4. Set a *Callback URL* (e.g., =http://localhost:29170/oauth/callback=)
-5. Select the ESI scopes your application needs
+2. Log in with your EVE Online account
+3. Navigate to "Applications" → "Create New Application"
+
+*** Step 2: Configure Your Application
+
+Fill in the application details:
+
+| Field           | Description                                          |
+|-----------------+------------------------------------------------------|
+| *Name*          | Your application's name (visible to users)           |
+| *Description*   | Brief description of what your application does      |
+| *Connection Type* | Choose "Authentication & API Access"               |
+| *Callback URL*  | =http://localhost:29170/oauth/callback= (see below)  |
+| *Scopes*        | Select only the ESI scopes your application needs    |
+
+*** Step 3: Callback URL
+
+The Callback URL is where EVE SSO redirects after authentication.
+
+*For development/testing:*
+#+begin_example
+http://localhost:29170/oauth/callback
+#+end_example
+
+This matches eve-gate's default configuration. ESI explicitly allows
+=http://localhost= callbacks without HTTPS for development.
+
+*For production applications:*
+
+Use your application's actual callback endpoint with HTTPS:
+#+begin_example
+https://your-app.example.com/oauth/callback
+#+end_example
+
+*** Step 4: Save Your Credentials
+
+After creating your application, you'll receive:
+
+- *Client ID*: A public identifier for your application
+- *Client Secret*: A private key (keep this secret!)
+
+*Never commit your Client Secret to version control or share it publicly.*
+
+** Using Your Credentials with Eve-Gate
 
 *** Create an Authenticated Client
 
@@ -37,11 +94,27 @@ EVE SSO uses the OAuth 2.0 authorization code flow:
 (ql:quickload :eve-gate)
 (in-package :eve-gate)
 
+;; Using environment variables (recommended)
+(defvar *client*
+  (make-eve-client 
+   :client-id (uiop:getenv "EVE_CLIENT_ID")
+   :client-secret (uiop:getenv "EVE_CLIENT_SECRET")
+   :redirect-uri "http://localhost:29170/oauth/callback"))
+
+;; Or with direct values (for testing only - never commit secrets!)
 (defvar *client*
   (make-eve-client 
    :client-id "your-client-id-here"
    :client-secret "your-client-secret-here"
    :redirect-uri "http://localhost:29170/oauth/callback"))
+#+end_src
+
+*** Environment Variables Setup
+
+#+begin_src sh
+# Add to your shell profile or .env file
+export EVE_CLIENT_ID="your-client-id"
+export EVE_CLIENT_SECRET="your-client-secret"
 #+end_src
 
 ** Authorization Flow

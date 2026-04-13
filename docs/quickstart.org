@@ -77,16 +77,28 @@ For public (unauthenticated) endpoints:
 
 ** Working with Authenticated Endpoints
 
-For endpoints that require authentication, see [[file:authentication.org][Authentication Guide]].
+For endpoints that require authentication (wallet, skills, assets, etc.),
+you need to register your own EVE Developer application and authenticate users.
+
+#+begin_quote
+*Important:* Every application using eve-gate must register its own EVE
+Developer application at [[https://developers.eveonline.com/]]. Eve-gate is a
+library - there is no shared Client ID. See [[file:authentication.org][Authentication Guide]] for
+complete setup instructions.
+#+end_quote
 
 *** Quick Preview
 
 #+begin_src lisp
-;; Create client with OAuth credentials
+;; First: Register YOUR application at https://developers.eveonline.com/
+;; Get your own Client ID and Client Secret
+;; Set Callback URL to: http://localhost:29170/oauth/callback
+
+;; Create client with YOUR OAuth credentials (use environment variables!)
 (defvar *auth-client*
   (make-eve-client 
-   :client-id "your-client-id"
-   :client-secret "your-client-secret"
+   :client-id (uiop:getenv "EVE_CLIENT_ID")
+   :client-secret (uiop:getenv "EVE_CLIENT_SECRET")
    :redirect-uri "http://localhost:29170/oauth/callback"))
 
 ;; Generate authorization URL
