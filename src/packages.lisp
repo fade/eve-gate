@@ -94,13 +94,79 @@
    #:esi-connection-timeout
    #:esi-read-timeout
    
-   ;; Condition utilities
-   #:status-code->condition-type
-   #:signal-esi-error
-   #:retryable-status-p
-   #:rate-limited-p
-   
-   ;; HTTP client
+    ;; Condition utilities
+    #:status-code->condition-type
+    #:signal-esi-error
+    #:retryable-status-p
+    #:rate-limited-p
+    
+    ;; Error context and logging
+    #:error-context
+    #:make-error-context
+    #:error-context-timestamp
+    #:error-context-condition
+    #:error-context-condition-type
+    #:error-context-endpoint
+    #:error-context-status-code
+    #:error-context-message
+    #:error-context-response-body
+    #:error-context-request-method
+    #:error-context-request-uri
+    #:error-context-retry-count
+    #:error-context-extra
+    #:format-error-context
+    #:log-esi-error
+    #:classify-error-severity
+    #:add-error-log-hook
+    #:remove-error-log-hook
+    #:clear-error-log-hooks
+    
+    ;; Error statistics
+    #:error-statistics
+    #:make-error-statistics
+    #:*error-statistics*
+    #:record-error
+    #:error-statistics-summary
+    #:reset-error-statistics
+    #:recent-errors
+    #:show-recent-errors
+    #:errors-by-endpoint
+    #:errors-by-type
+    #:errors-by-status
+    
+    ;; Circuit breaker
+    #:circuit-breaker
+    #:make-circuit-breaker
+    #:circuit-breaker-state
+    #:circuit-breaker-allow-request-p
+    #:circuit-breaker-record-success
+    #:circuit-breaker-record-failure
+    #:circuit-breaker-reset
+    #:circuit-breaker-status
+    #:*default-circuit-breaker*
+    #:get-circuit-breaker
+    #:register-circuit-breaker
+    #:list-circuit-breakers
+    
+    ;; Graceful degradation
+    #:register-fallback
+    #:find-fallback
+    #:invoke-fallback
+    #:with-esi-fallback
+    #:call-with-error-handling
+    #:retryable-error-p
+    #:ignoring-esi-errors
+    #:with-esi-error-logging
+    
+    ;; Health monitoring
+    #:esi-health-status
+    #:esi-health-report
+    
+    ;; Resilient middleware
+    #:make-error-handling-middleware
+    #:make-resilient-middleware-stack
+    
+    ;; HTTP client
    #:http-client
    #:make-http-client
    #:http-request

@@ -36,13 +36,14 @@
                  (:file "error-types")))
                
                ;; Core HTTP and authentication
-               (:module "core"
-                :depends-on ("packages" "utils" "types")
-                :components
-                ((:file "conditions")
-                 (:file "http-client")
-                 (:file "middleware")
-                 (:file "rate-limiter")))
+                (:module "core"
+                 :depends-on ("packages" "utils" "types")
+                 :components
+                 ((:file "conditions")
+                  (:file "http-client")
+                  (:file "middleware")
+                  (:file "error-handling" :depends-on ("conditions" "middleware"))
+                  (:file "rate-limiter")))
                
                ;; Authentication system
                (:module "auth"
