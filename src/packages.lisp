@@ -429,11 +429,214 @@
    #:record-allocation
    #:memory-usage-report
    
-   ;; Hash-table optimization
-   #:make-sized-hash-table
-   
-   ;; Combined initialization
-   #:initialize-performance-subsystem))
+    ;; Hash-table optimization
+    #:make-sized-hash-table
+    
+    ;; Combined initialization
+    #:initialize-performance-subsystem
+    
+    ;; --- Format handlers (formats.lisp) ---
+    ;; Format handler struct
+    #:format-handler
+    #:format-handler-name
+    #:format-handler-description
+    #:format-handler-extension
+    #:format-handler-mime-type
+    #:format-handler-streaming-p
+    
+    ;; Format registry
+    #:*format-registry*
+    #:register-format
+    #:find-format-handler
+    #:list-formats
+    #:format-extension
+    #:format-mime-type
+    
+    ;; Core encode/decode
+    #:encode-data
+    #:decode-data
+    #:encode-to-string
+    #:decode-from-string
+    
+    ;; Format detection
+    #:detect-format-from-path
+    #:detect-format-from-content
+    
+    ;; Schema validation for data
+    #:data-schema
+    #:make-data-schema
+    #:data-schema-name
+    #:data-schema-fields
+    #:field-schema
+    #:make-field-schema
+    #:field-schema-name
+    #:field-schema-type
+    #:field-schema-required-p
+    #:validate-record-against-schema
+    #:validate-data-against-schema
+    
+    ;; EVE-specific schemas
+    #:*eve-character-schema*
+    #:*eve-market-order-schema*
+    #:*eve-wallet-transaction-schema*
+    
+    ;; Data normalization
+    #:ensure-list-of-plists
+    #:hash-table-to-plist
+    #:normalize-value
+    
+    ;; Format REPL utilities
+    #:format-registry-summary
+    
+    ;; --- Data privacy and compliance (data-privacy.lisp) ---
+    ;; Privacy classification
+    #:classify-data
+    #:personal-data-p
+    #:sensitive-data-p
+    #:*esi-data-classifications*
+    
+    ;; Personal data identification
+    #:*personal-data-fields*
+    #:*directly-identifying-fields*
+    #:personal-field-p
+    #:directly-identifying-field-p
+    #:find-personal-fields
+    
+    ;; Anonymization
+    #:*anonymization-salt*
+    #:pseudonymize-value
+    #:anonymize-record
+    #:anonymize-dataset
+    #:mask-value
+    #:generalize-value
+    
+    ;; Retention policies
+    #:retention-policy
+    #:make-retention-policy
+    #:retention-policy-data-category
+    #:retention-policy-retention-days
+    #:retention-policy-action
+    #:register-retention-policy
+    #:get-retention-policy
+    #:check-retention
+    #:enforce-retention
+    
+    ;; Data subject rights (GDPR)
+    #:data-subject-request
+    #:make-data-subject-request
+    #:create-access-request
+    #:create-portability-request
+    #:create-deletion-request
+    #:filter-data-for-subject
+    #:delete-data-for-subject
+    #:list-data-subject-requests
+    
+    ;; Privacy assessment
+    #:assess-data-privacy
+    #:with-privacy-controls
+    
+    ;; Privacy REPL
+    #:privacy-status
+    
+    ;; --- Data export (export.lisp) ---
+    ;; Export job
+    #:export-job
+    #:make-export-job
+    #:export-job-id
+    #:export-job-name
+    #:export-job-format
+    #:export-job-data-category
+    #:export-job-character-id
+    #:export-job-status
+    #:export-job-record-count
+    #:export-job-destination
+    #:export-job-error-message
+    
+    ;; Export execution
+    #:execute-export
+    
+    ;; High-level export functions
+    #:export-character-data
+    #:export-market-data
+    #:export-corporation-data
+    #:export-for-portability
+    
+    ;; Incremental export
+    #:export-checkpoint
+    #:make-export-checkpoint
+    #:incremental-export
+    
+    ;; Export REPL
+    #:export-summary
+    
+    ;; --- Data import (import.lisp) ---
+    ;; Import job
+    #:import-job
+    #:make-import-job
+    #:import-job-id
+    #:import-job-name
+    #:import-job-format
+    #:import-job-data-category
+    #:import-job-status
+    #:import-job-total-records
+    #:import-job-imported-count
+    #:import-job-skipped-count
+    #:import-job-error-count
+    #:import-job-validation-errors
+    #:import-job-merge-strategy
+    #:import-job-error-message
+    
+    ;; Import execution
+    #:execute-import
+    #:batch-import
+    
+    ;; Import transaction support
+    #:import-transaction
+    #:begin-import-transaction
+    #:commit-import-transaction
+    #:rollback-import-transaction
+    #:with-import-transaction
+    
+    ;; High-level import functions
+    #:import-from-file
+    #:import-from-string
+    #:validate-import-file
+    
+    ;; Import REPL
+    #:import-summary
+    
+    ;; --- Data operations (data-ops.lisp) ---
+    ;; Manager
+    #:data-ops-manager
+    #:*data-ops-manager*
+    #:initialize-data-ops
+    #:ensure-data-ops-manager
+    
+    ;; Managed operations
+    #:managed-export
+    #:managed-import
+    
+    ;; Data integrity
+    #:compute-data-checksum
+    #:verify-data-integrity
+    #:create-integrity-manifest
+    #:verify-against-manifest
+    
+    ;; Backup and restore
+    #:create-backup
+    #:restore-backup
+    
+    ;; Monitoring
+    #:data-ops-status
+    #:data-ops-metrics
+    
+    ;; Convenience
+    #:quick-export
+    #:quick-import
+    #:round-trip-test
+    
+    ;; Combined initialization
+    #:initialize-data-exchange))
 
 (defpackage #:eve-gate.types
   (:use #:cl #:alexandria)

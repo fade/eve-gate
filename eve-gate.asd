@@ -36,7 +36,13 @@
                    (:file "time-utils")
                    (:file "performance" :depends-on ("logging"))
                    (:file "memory-pool" :depends-on ("logging" "performance"))
-                   (:file "debug-logger" :depends-on ("logging" "log-output" "performance"))))
+                   (:file "debug-logger" :depends-on ("logging" "log-output" "performance"))
+                   (:file "formats" :depends-on ("logging"))
+                   (:file "data-privacy" :depends-on ("logging" "audit-logger"))
+                   (:file "export" :depends-on ("logging" "audit-logger" "formats" "data-privacy"))
+                   (:file "import" :depends-on ("logging" "audit-logger" "formats" "data-privacy"))
+                   (:file "data-ops" :depends-on ("logging" "audit-logger" "configuration"
+                                                  "formats" "data-privacy" "export" "import"))))
                
                 ;; Type system
                 (:module "types" 
