@@ -72,8 +72,8 @@ secrets.lisp
 *.conf
 !*.conf.example
 
-# Generated API code (regenerated from ESI spec)
-src/api/generated/
+# Generated API code now tracked in repository
+# Keep generation signature file for incremental regeneration
 src/api/generated/.generation-signatures.sexp
 
 # Documentation build
