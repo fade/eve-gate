@@ -1211,6 +1211,7 @@
         #:eve-gate.core #:eve-gate.auth #:eve-gate.cache #:eve-gate.api)
   (:import-from #:bordeaux-threads)
   (:import-from #:cl-ppcre)
+  (:import-from #:lparallel)
   (:export
    ;; --- Token bucket (rate-limiter.lisp) ---
    #:token-bucket
@@ -1317,24 +1318,101 @@
    #:engine-status
    #:reset-engine-metrics
    
-   ;; --- Legacy stubs (bulk-operations.lisp, parallel-client.lisp, job-queue.lisp) ---
-   ;; Bulk operations
+   ;; --- Parallel executor (parallel-executor.lisp) ---
+   ;; Kernel management
+   #:*parallel-kernel*
+   #:ensure-parallel-kernel
+   #:shutdown-parallel-kernel
+   #:with-parallel-kernel
+   
+   ;; Parallel operations
+   #:parallel-fetch
+   #:parallel-map-ids
+   #:parallel-fetch-all-pages
+   
+   ;; Request deduplication
+   #:dedup-cache
+   #:make-dedup-cache
+   #:initialize-dedup-cache
+   #:dedup-fetch
+   #:dedup-statistics
+   #:*dedup-cache*
+   
+   ;; Utilities
+   #:compute-chunk-size
+   #:partition-list
+   #:atomic-counter
+   #:make-atomic-counter
+   #:atomic-counter-increment
+   #:atomic-counter-value-of
+   
+   ;; --- Worker pool (worker-pool.lisp) ---
+   ;; Worker pool
+   #:worker-pool
+   #:make-worker-pool
+   #:start-pool
+   #:stop-pool
+   #:pool-submit
+   #:pool-submit-and-wait
+   #:check-pool-scaling
+   #:check-worker-health
+   #:pool-metrics
+   
+   ;; Pool manager
+   #:pool-manager
+   #:make-pool-manager
+   #:start-pool-manager
+   #:stop-pool-manager
+   #:get-pool
+   #:manager-submit
+   #:pool-manager-status
+   
+   ;; --- Bulk operations (bulk-operations.lisp) ---
    #:bulk-get
    #:bulk-post
    #:bulk-process
    #:with-bulk-processing
+   #:bulk-expand-ids
+   #:bulk-fetch-paginated
    
-   ;; Parallel client
+   ;; --- Parallel client (parallel-client.lisp) ---
    #:parallel-client
    #:make-parallel-client
+   #:start-parallel-client
+   #:stop-parallel-client
+   #:with-parallel-client
    #:parallel-api-call
+   #:parallel-bulk-fetch
+   #:parallel-fetch-by-ids
+   #:parallel-fetch-pages
+   #:parallel-client-status
+   #:parallel-client-metrics
+   
+   ;; --- Job queue (job-queue.lisp) ---
+   ;; Job
+   #:job
+   #:make-job
+   #:job-id
+   #:job-name
+   #:job-status
+   #:job-result
+   #:job-error
+   #:job-complete-p
+   #:job-runnable-p
+   #:complete-job
+   #:fail-job
+   #:cancel-job
+   #:wait-for-job
+   #:job-elapsed-time
    
    ;; Job queue
    #:job-queue
    #:make-job-queue
    #:enqueue-job
    #:process-jobs
-   #:job-status))
+   #:stop-job-processing
+   #:job-status-query
+   #:job-queue-status))
 
 (defpackage #:eve-gate
   (:use #:cl #:alexandria)

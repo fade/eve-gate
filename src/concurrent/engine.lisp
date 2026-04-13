@@ -48,7 +48,7 @@ Slots:
   (rate-limiter nil :type (or null esi-rate-limiter))
   (request-queue nil :type (or null request-queue))
   (worker-threads nil :type list)
-  (worker-count 4 :type (integer 1))
+  (worker-count 4 :type (integer 0))
   (running-p nil :type boolean)
   (metrics-lock (bt:make-lock "engine-metrics-lock"))
   (total-requests 0 :type (integer 0))

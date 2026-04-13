@@ -12,6 +12,7 @@
                #:local-time       ; Time handling
                #:cl-ppcre         ; Regular expressions
                #:bordeaux-threads ; Thread synchronization
+               #:lparallel        ; Parallel processing
                #:ciao)            ; OAuth 2.0 client
   :pathname "src/"
   :serial nil
@@ -118,9 +119,12 @@
                   (:file "request-queue" :depends-on ("rate-limiter"))
                   (:file "throttling" :depends-on ("rate-limiter" "request-queue"))
                   (:file "engine" :depends-on ("rate-limiter" "request-queue" "throttling"))
-                  (:file "bulk-operations" :depends-on ("engine"))
-                  (:file "parallel-client" :depends-on ("engine"))
-                  (:file "job-queue" :depends-on ("request-queue"))))
+                  (:file "parallel-executor" :depends-on ("engine"))
+                  (:file "worker-pool" :depends-on ("engine"))
+                  (:file "bulk-operations" :depends-on ("engine" "parallel-executor"))
+                  (:file "parallel-client" :depends-on ("engine" "parallel-executor"
+                                                        "bulk-operations"))
+                  (:file "job-queue" :depends-on ("engine"))))
                
                ;; Main interface
                (:file "main" 
