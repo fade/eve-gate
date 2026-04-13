@@ -3,8 +3,8 @@
 (in-package #:eve-gate)
 
 ;; Configuration constants
-(defparameter *default-user-agent* "eve-gate/0.1.0 (Common Lisp)")
-(defparameter *esi-base-url* "https://esi.evetech.net")
+(defparameter *default-user-agent* eve-gate.core:*user-agent*
+  "Default user-agent string. Delegates to the core module definition.")
 
 ;; Main client structure
 (defclass eve-client ()
@@ -20,8 +20,9 @@
   "Create a new EVE client instance with optional configuration."
   (let* ((final-config (merge-config config client-id client-secret redirect-uri))
          (http-client (eve-gate.core:make-http-client 
-                      :timeout (get-config-value :default-timeout final-config)
-                      :retries (get-config-value :default-retries final-config)))
+                      :timeout (or (get-config-value :default-timeout final-config) 30)
+                      :retries (or (get-config-value :default-retries final-config) 3)
+                      :middleware (eve-gate.core:make-default-middleware-stack)))
          (cache-manager (when (get-config-value :cache-enabled final-config)
                          (eve-gate.cache:make-cache-manager)))
          (auth-client (when (and client-id client-secret)
@@ -30,9 +31,9 @@
                         :client-secret client-secret
                         :redirect-uri redirect-uri)))
          (api-client (eve-gate.api:make-api-client
-                     :http-client http-client
-                     :cache-manager cache-manager
-                     :base-url *esi-base-url*)))
+                      :http-client http-client
+                      :cache-manager cache-manager
+                      :base-url eve-gate.core:*esi-base-url*)))
     (make-instance 'eve-client
                    :http-client http-client
                    :auth-client auth-client
