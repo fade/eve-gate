@@ -3,11 +3,192 @@
 (defpackage #:eve-gate.utils
   (:use #:cl #:alexandria)
   (:import-from #:bordeaux-threads)
+  (:import-from #:com.inuoe.jzon)
   (:export 
-   ;; Logging
+   ;; --- Structured Logging Core (logging.lisp) ---
+   ;; Configuration
    #:*log-level*
-   #:log-debug #:log-info #:log-warn #:log-error
-   #:with-logging
+   #:*log-source*
+   #:*log-request-id*
+   #:*log-correlation-id*
+   #:*log-character-id*
+   #:*log-extra-context*
+   #:*log-enabled-p*
+   #:*log-destinations*
+   
+   ;; Log level utilities
+   #:log-level-active-p
+   #:log-level-value
+   
+   ;; Core logging functions
+   #:log-trace #:log-debug #:log-info #:log-warn #:log-error #:log-fatal
+   #:log-event
+   #:emit-log
+   
+   ;; Log entry structure
+   #:log-entry
+   #:make-log-entry
+   #:log-entry-timestamp
+   #:log-entry-level
+   #:log-entry-source
+   #:log-entry-message
+   #:log-entry-request-id
+   #:log-entry-correlation-id
+   #:log-entry-character-id
+   #:log-entry-thread-name
+   #:log-entry-sequence
+   #:log-entry-fields
+   #:log-entry-error-p
+   #:log-entry-to-plist
+   #:format-log-timestamp
+   
+   ;; Context management macros
+   #:with-log-level
+   #:with-logging               ; backward-compat alias
+   #:with-log-source
+   #:with-request-context
+   #:with-correlation-context
+   #:with-log-context
+   
+   ;; Request ID generation
+   #:generate-request-id
+   #:generate-correlation-id
+   
+   ;; Destination management
+   #:add-log-destination
+   #:remove-log-destination
+   #:clear-log-destinations
+   #:list-log-destinations
+   
+   ;; Initialization and status
+   #:initialize-logging
+   #:logging-status
+   
+   ;; --- Log Output Destinations (log-output.lisp) ---
+   ;; Formatters
+   #:format-log-json
+   #:format-log-text
+   #:format-log-dev
+   #:get-log-formatter
+   
+   ;; Destination constructors
+   #:make-console-destination
+   #:make-file-destination
+   #:make-async-destination
+   #:make-multi-destination
+   #:make-level-filter-destination
+   
+   ;; Async buffer management
+   #:stop-async-destination
+   
+   ;; Standard setup helpers
+   #:setup-development-logging
+   #:setup-production-logging
+   #:shutdown-logging
+   
+   ;; --- ESI-Specific Logging (esi-logger.lisp) ---
+   ;; Sanitization
+   #:sanitize-headers-for-log
+   #:truncate-body-for-log
+   
+   ;; HTTP request/response logging
+   #:log-esi-request
+   #:log-esi-response
+   #:log-esi-request-error
+   
+   ;; Rate limit event logging
+   #:log-rate-limit-status
+   #:log-rate-limit-exceeded
+   #:log-rate-limit-backoff
+   #:log-throttle-status
+   
+   ;; Authentication event logging
+   #:log-auth-token-refresh
+   #:log-auth-scope-check
+   #:log-auth-event
+   
+   ;; Cache event logging
+   #:log-cache-hit
+   #:log-cache-miss
+   #:log-cache-store
+   #:log-cache-invalidation
+   #:log-cache-etag-revalidation
+   #:log-cache-statistics
+   
+   ;; Circuit breaker logging
+   #:log-circuit-breaker-state-change
+   
+   ;; Middleware integration helpers
+   #:make-structured-logging-request-fn
+   #:make-structured-logging-response-fn
+   
+   ;; --- Audit and Compliance Logging (audit-logger.lisp) ---
+   ;; Configuration
+   #:*audit-enabled-p*
+   #:*audit-retention-count*
+   
+   ;; Audit entry structure
+   #:audit-entry
+   #:audit-entry-timestamp
+   #:audit-entry-event-type
+   #:audit-entry-action
+   #:audit-entry-character-id
+   #:audit-entry-character-name
+   #:audit-entry-endpoint
+   #:audit-entry-method
+   #:audit-entry-status
+   #:audit-entry-details
+   #:audit-entry-request-id
+   
+   ;; Audit trail
+   #:*audit-trail*
+   #:initialize-audit-logging
+   #:ensure-audit-trail
+   #:record-audit-entry
+   
+   ;; Audit logging API
+   #:audit-authentication
+   #:audit-endpoint-access
+   #:audit-data-export
+   #:audit-rate-limit-violation
+   #:audit-security-event
+   
+   ;; Audit querying
+   #:query-audit-trail
+   #:audit-trail-summary
+   #:format-audit-entry
+   #:show-recent-audit-events
+   
+   ;; --- Performance and Debug Logging (debug-logger.lisp) ---
+   ;; Timed operation logging
+   #:with-logged-timing
+   #:log-slow-operation
+   #:check-performance-threshold
+   
+   ;; Performance thresholds
+   #:*performance-thresholds*
+   #:get-performance-threshold
+   
+   ;; Memory and diagnostics
+   #:log-memory-snapshot
+   #:get-memory-usage
+   
+   ;; Cache and connection reporting
+   #:log-cache-effectiveness
+   #:log-connection-pool-stats
+   
+   ;; Request tracing
+   #:request-trace
+   #:*tracing-enabled-p*
+   #:with-request-tracing
+   #:trace-phase
+   
+   ;; Performance reporting
+   #:log-performance-summary
+   
+   ;; Debug context
+   #:with-debug-context
+   #:log-system-diagnostics
    
    ;; Configuration  
    #:*default-config*

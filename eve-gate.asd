@@ -20,15 +20,19 @@
                (:file "packages")
                
                 ;; Utilities (foundation layer)
-                (:module "utils"
-                 :depends-on ("packages")
-                 :components
-                 ((:file "logging")
-                  (:file "configuration")
-                  (:file "string-utils")
-                  (:file "time-utils")
-                  (:file "performance" :depends-on ("logging"))
-                  (:file "memory-pool" :depends-on ("logging" "performance"))))
+                 (:module "utils"
+                  :depends-on ("packages")
+                  :components
+                  ((:file "logging")
+                   (:file "log-output" :depends-on ("logging"))
+                   (:file "esi-logger" :depends-on ("logging" "log-output"))
+                   (:file "audit-logger" :depends-on ("logging"))
+                   (:file "configuration")
+                   (:file "string-utils")
+                   (:file "time-utils")
+                   (:file "performance" :depends-on ("logging"))
+                   (:file "memory-pool" :depends-on ("logging" "performance"))
+                   (:file "debug-logger" :depends-on ("logging" "log-output" "performance"))))
                
                 ;; Type system
                 (:module "types" 
