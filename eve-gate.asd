@@ -10,7 +10,8 @@
                #:com.inuoe.jzon   ; JSON processing
                #:alexandria       ; Common utilities
                #:local-time       ; Time handling
-               #:cl-ppcre)        ; Regular expressions
+               #:cl-ppcre         ; Regular expressions
+               #:ciao)            ; OAuth 2.0 client
   :pathname "src/"
   :serial nil
   :components (;; Core package definitions
