@@ -19,14 +19,16 @@
   :components (;; Core package definitions
                (:file "packages")
                
-               ;; Utilities (foundation layer)
-               (:module "utils"
-                :depends-on ("packages")
-                :components
-                ((:file "logging")
-                 (:file "configuration")
-                 (:file "string-utils")
-                 (:file "time-utils")))
+                ;; Utilities (foundation layer)
+                (:module "utils"
+                 :depends-on ("packages")
+                 :components
+                 ((:file "logging")
+                  (:file "configuration")
+                  (:file "string-utils")
+                  (:file "time-utils")
+                  (:file "performance" :depends-on ("logging"))
+                  (:file "memory-pool" :depends-on ("logging" "performance"))))
                
                 ;; Type system
                 (:module "types" 
@@ -39,14 +41,15 @@
                   (:file "error-types" :depends-on ("esi-types"))))
                
                ;; Core HTTP and authentication
-                (:module "core"
-                 :depends-on ("packages" "utils" "types")
-                 :components
-                 ((:file "conditions")
-                  (:file "http-client")
-                  (:file "middleware")
-                  (:file "error-handling" :depends-on ("conditions" "middleware"))
-                  (:file "rate-limiter")))
+                 (:module "core"
+                  :depends-on ("packages" "utils" "types")
+                  :components
+                  ((:file "conditions")
+                   (:file "http-client")
+                   (:file "middleware")
+                   (:file "error-handling" :depends-on ("conditions" "middleware"))
+                   (:file "rate-limiter")
+                   (:file "connection-pool" :depends-on ("http-client" "middleware"))))
                
                ;; Authentication system
                (:module "auth"
@@ -160,5 +163,5 @@
                #:eve-gate/tests)
   :pathname "dev/"
   :components ((:file "repl-utils")
-               (:file "benchmarks")
-               (:file "debugging")))
+               (:file "benchmarks" :depends-on ("repl-utils"))
+               (:file "debugging" :depends-on ("repl-utils"))))

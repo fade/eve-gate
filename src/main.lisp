@@ -16,24 +16,42 @@
    (authenticated-p :initform nil :accessor client-authenticated-p))
   (:documentation "Main EVE Online ESI API client."))
 
-(defun make-eve-client (&key config client-id client-secret redirect-uri)
-  "Create a new EVE client instance with optional configuration."
+(defun make-eve-client (&key config client-id client-secret redirect-uri
+                              (enable-performance-monitoring t))
+  "Create a new EVE client instance with optional configuration.
+
+ENABLE-PERFORMANCE-MONITORING: Initialize performance subsystem (default: T)
+  When enabled, initializes string interning, memory pools, performance
+  metrics, and connection pool optimization."
+  ;; Initialize performance subsystem (idempotent)
+  (when enable-performance-monitoring
+    (eve-gate.utils:initialize-performance-subsystem)
+    (eve-gate.core:initialize-connection-pool
+     :max-connections (or (get-config-value :connection-pool-size config) 20)
+     :enable-compression t))
   (let* ((final-config (merge-config config client-id client-secret redirect-uri))
+         ;; Build middleware stack with connection pool optimization
+         (base-middleware (eve-gate.core:make-default-middleware-stack))
+         (full-middleware (if enable-performance-monitoring
+                              (eve-gate.core:add-middleware
+                               base-middleware
+                               (eve-gate.core:make-connection-pool-middleware))
+                              base-middleware))
          (http-client (eve-gate.core:make-http-client 
-                      :timeout (or (get-config-value :default-timeout final-config) 30)
-                      :retries (or (get-config-value :default-retries final-config) 3)
-                      :middleware (eve-gate.core:make-default-middleware-stack)))
+                       :timeout (or (get-config-value :default-timeout final-config) 30)
+                       :retries (or (get-config-value :default-retries final-config) 3)
+                       :middleware full-middleware))
          (cache-manager (when (get-config-value :cache-enabled final-config)
-                         (eve-gate.cache:make-cache-manager)))
+                          (eve-gate.cache:make-cache-manager)))
          (auth-client (when (and client-id client-secret)
-                       (eve-gate.auth:make-oauth-client
-                        :client-id client-id
-                        :client-secret client-secret
-                        :redirect-uri redirect-uri)))
+                        (eve-gate.auth:make-oauth-client
+                         :client-id client-id
+                         :client-secret client-secret
+                         :redirect-uri redirect-uri)))
          (api-client (eve-gate.api:make-api-client
-                      :http-client http-client
-                      :cache-manager cache-manager
-                      :base-url eve-gate.core:*esi-base-url*)))
+                       :http-client http-client
+                       :cache-manager cache-manager
+                       :base-url eve-gate.core:*esi-base-url*)))
     (make-instance 'eve-client
                    :http-client http-client
                    :auth-client auth-client

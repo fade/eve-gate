@@ -309,8 +309,13 @@ Example:
                (getf request-context :method)
                (getf request-context :uri)
                (getf request-context :headers)))
-    ;; Execute with retry logic
-    (execute-with-retries client request-context parse-json)))
+    ;; Execute with retry logic and performance tracking
+    (let ((start-time (get-precise-time)))
+      (multiple-value-prog1
+          (execute-with-retries client request-context parse-json)
+        (let ((elapsed-ms (elapsed-milliseconds start-time)))
+          (record-metric :http-request-latency elapsed-ms)
+          (record-request-completed elapsed-ms))))))
 
 (defun execute-with-retries (client request-context parse-json)
   "Execute an HTTP request with retry logic for transient errors.
@@ -438,7 +443,8 @@ BODY: A string containing JSON data
 
 Returns the parsed JSON value, or the original string if parsing fails."
   (handler-case
-      (com.inuoe.jzon:parse body)
+      (with-metric-timing (:json-parse-time)
+        (com.inuoe.jzon:parse body))
     (error (e)
       (log-warn "Failed to parse JSON response: ~A" e)
       body)))

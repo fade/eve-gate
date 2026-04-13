@@ -359,23 +359,15 @@ DATASOURCE: Datasource string (default: \"tranquility\")
 
 Returns a deterministic cache key string.
 
+Uses FAST-CACHE-KEY from the performance module for optimized string
+construction, avoiding FORMAT overhead in this hot path.
+
 Example:
   (make-cache-key \"/v5/characters/95465499/\"
                   :params '((\"datasource\" . \"tranquility\"))
                   :auth-context \"95465499\")
   => \"esi:/v5/characters/95465499/?datasource=tranquility|auth:95465499|ds:tranquility\""
-  (let* ((sorted-params (sort (copy-list (or params nil))
-                              #'string<
-                              :key #'car))
-         (param-string (format nil "~{~A=~A~^&~}"
-                               (loop for (k . v) in sorted-params
-                                     collect k collect v)))
-         (ds (or datasource "tranquility")))
-    (format nil "esi:~A~@[?~A~]~@[|auth:~A~]|ds:~A"
-            endpoint
-            (when (plusp (length param-string)) param-string)
-            auth-context
-            ds)))
+  (fast-cache-key endpoint params auth-context datasource))
 
 (defun extract-auth-context-from-params (params)
   "Extract authentication context from request parameters.

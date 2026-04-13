@@ -2,6 +2,7 @@
 
 (defpackage #:eve-gate.utils
   (:use #:cl #:alexandria)
+  (:import-from #:bordeaux-threads)
   (:export 
    ;; Logging
    #:*log-level*
@@ -24,7 +25,96 @@
    #:current-timestamp
    #:format-iso8601
    #:parse-iso8601
-   #:time-elapsed-p))
+   #:time-elapsed-p
+   
+   ;; --- Performance utilities (performance.lisp) ---
+   ;; High-resolution timing
+   #:get-precise-time
+   #:elapsed-microseconds
+   #:elapsed-milliseconds
+   #:with-timing
+   #:timing
+   
+   ;; Metric buckets
+   #:metric-bucket
+   #:make-metric-bucket
+   #:metric-bucket-record
+   #:metric-bucket-stats
+   #:metric-bucket-reset
+   
+   ;; Performance metrics registry
+   #:perf-metrics
+   #:*perf-metrics*
+   #:initialize-performance-metrics
+   #:ensure-perf-metrics
+   #:record-metric
+   #:increment-counter
+   #:counter-value
+   #:with-metric-timing
+   
+   ;; Latency histogram
+   #:latency-histogram
+   #:make-latency-histogram
+   #:histogram-record
+   #:histogram-percentile
+   #:histogram-stats
+   
+   ;; Throughput tracker
+   #:throughput-tracker
+   #:make-throughput-tracker
+   #:throughput-record
+   #:throughput-rate
+   
+   ;; ESI performance monitor
+   #:esi-perf-monitor
+   #:*esi-perf-monitor*
+   #:initialize-performance-monitor
+   #:ensure-perf-monitor
+   #:record-request-completed
+   
+   ;; Performance reporting
+   #:performance-report
+   #:reset-performance-metrics
+   #:benchmark
+   
+   ;; --- Memory pool utilities (memory-pool.lisp) ---
+   ;; String interning
+   #:string-interner
+   #:*string-interner*
+   #:make-string-interner
+   #:initialize-string-interner
+   #:intern-string
+   #:string-interner-statistics
+   
+   ;; Optimized cache key generation
+   #:fast-cache-key
+   
+   ;; Object pool
+   #:object-pool
+   #:make-object-pool
+   #:pool-acquire
+   #:pool-release
+   #:with-pooled-object
+   #:object-pool-statistics
+   
+   ;; Pre-configured pools
+   #:*string-output-stream-pool*
+   #:*response-list-pool*
+   #:initialize-memory-pools
+   
+   ;; Memory tracking
+   #:memory-tracker
+   #:*memory-tracker*
+   #:current-memory-usage
+   #:initialize-memory-tracker
+   #:record-allocation
+   #:memory-usage-report
+   
+   ;; Hash-table optimization
+   #:make-sized-hash-table
+   
+   ;; Combined initialization
+   #:initialize-performance-subsystem))
 
 (defpackage #:eve-gate.types
   (:use #:cl #:alexandria)
@@ -470,10 +560,39 @@
    ;; URI construction
    #:build-esi-uri
    
-   ;; Rate limiting (stubs for future)
-   #:make-rate-limiter
-   #:rate-limit-acquire
-   #:rate-limit-status))
+    ;; Rate limiting (stubs for future)
+    #:make-rate-limiter
+    #:rate-limit-acquire
+    #:rate-limit-status
+    
+    ;; --- Connection pool (connection-pool.lisp) ---
+    ;; Configuration
+    #:connection-pool-config
+    #:make-connection-pool-config
+    #:connection-pool-config-max-connections
+    #:connection-pool-config-max-idle-time
+    #:connection-pool-config-keep-alive-timeout
+    #:connection-pool-config-connection-timeout
+    #:connection-pool-config-dns-cache-ttl
+    #:connection-pool-config-enable-compression-p
+    #:connection-pool-config-metrics-enabled-p
+    
+    ;; Initialization
+    #:initialize-connection-pool
+    #:*connection-pool-config*
+    
+    ;; Metrics
+    #:*connection-pool-metrics*
+    #:record-connection-event
+    #:connection-pool-statistics
+    
+    ;; Headers and middleware
+    #:connection-pool-headers
+    #:make-connection-pool-middleware
+    
+    ;; Utilities
+    #:optimal-worker-count-for-connections
+    #:connection-pool-status))
 
 (defpackage #:eve-gate.auth
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core)

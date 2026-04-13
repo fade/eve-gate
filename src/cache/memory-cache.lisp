@@ -217,32 +217,40 @@ Returns two values:
   1. The cached value, or NIL if not found/expired
   2. The cache-entry struct (for ETag access), or NIL
 
-Thread-safe. Moves accessed entries to front of LRU list."
-  (bt:with-lock-held ((memory-cache-lock cache))
-    (let ((entry (gethash key (memory-cache-table cache))))
-      (cond
-        ;; No entry found
-        ((null entry)
-         (%inc-stat cache :misses)
-         (values nil nil))
-        ;; Entry expired
-        ((cache-entry-expired-p entry)
-         (%inc-stat cache :misses)
-         (%inc-stat cache :expirations)
-         ;; Lazily evict if configured
-         (when (memory-cache-evict-expired-on-access cache)
-           (%memory-cache-remove-entry cache entry))
-         ;; Return entry anyway so caller can use ETag for conditional request
-         (values nil entry))
-        ;; Valid entry - cache hit
-        (t
-         (%inc-stat cache :hits)
-         ;; Update access tracking
-         (setf (cache-entry-accessed-at entry) (get-universal-time))
-         (incf (cache-entry-access-count entry))
-         ;; Move to front of LRU
-         (%lru-move-to-front cache entry)
-         (values (cache-entry-value entry) entry))))))
+Thread-safe. Moves accessed entries to front of LRU list.
+Records performance metrics for cache hit/miss latency tracking."
+  (let ((start-time (eve-gate.utils:get-precise-time)))
+    (bt:with-lock-held ((memory-cache-lock cache))
+      (let ((entry (gethash key (memory-cache-table cache))))
+        (cond
+          ;; No entry found
+          ((null entry)
+           (%inc-stat cache :misses)
+           (eve-gate.utils:record-metric :cache-miss-latency
+                                          (eve-gate.utils:elapsed-milliseconds start-time))
+           (values nil nil))
+          ;; Entry expired
+          ((cache-entry-expired-p entry)
+           (%inc-stat cache :misses)
+           (%inc-stat cache :expirations)
+           ;; Lazily evict if configured
+           (when (memory-cache-evict-expired-on-access cache)
+             (%memory-cache-remove-entry cache entry))
+           (eve-gate.utils:record-metric :cache-miss-latency
+                                          (eve-gate.utils:elapsed-milliseconds start-time))
+           ;; Return entry anyway so caller can use ETag for conditional request
+           (values nil entry))
+          ;; Valid entry - cache hit
+          (t
+           (%inc-stat cache :hits)
+           ;; Update access tracking
+           (setf (cache-entry-accessed-at entry) (get-universal-time))
+           (incf (cache-entry-access-count entry))
+           ;; Move to front of LRU
+           (%lru-move-to-front cache entry)
+           (eve-gate.utils:record-metric :cache-hit-latency
+                                          (eve-gate.utils:elapsed-milliseconds start-time))
+           (values (cache-entry-value entry) entry)))))))
 
 (defun memory-cache-put (cache key value &key etag ttl (size-estimate 0))
   "Store a value in the memory cache.
