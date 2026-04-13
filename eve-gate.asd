@@ -63,14 +63,15 @@
                  (:file "database-cache")
                  (:file "cache-manager")))
                
-               ;; API generation and endpoints
-               (:module "api"
-                :depends-on ("packages" "utils" "types" "core" "auth" "cache")
-                :components
-                ((:file "openapi-processor")
-                 (:file "code-generator")
-                 (:file "endpoint-registry")
-                 (:file "api-client")))
+                ;; API generation and endpoints
+                (:module "api"
+                 :depends-on ("packages" "utils" "types" "core" "auth" "cache")
+                 :components
+                 ((:file "schema-parser")
+                  (:file "spec-processor" :depends-on ("schema-parser"))
+                  (:file "code-generator" :depends-on ("schema-parser" "spec-processor"))
+                  (:file "endpoint-registry" :depends-on ("spec-processor"))
+                  (:file "api-client" :depends-on ("endpoint-registry"))))
                
                ;; Concurrent operations
                (:module "concurrent"

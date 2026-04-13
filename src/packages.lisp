@@ -366,23 +366,144 @@
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core 
         #:eve-gate.auth #:eve-gate.cache)
   (:export
-   ;; OpenAPI processing
-   #:load-openapi-spec
-   #:process-openapi-spec
-   #:generate-api-functions
+   ;; --- Schema parser ---
+   ;; Schema definition structure
+   #:schema-definition
+   #:make-schema-definition
+   #:schema-definition-name
+   #:schema-definition-type
+   #:schema-definition-format
+   #:schema-definition-description
+   #:schema-definition-properties
+   #:schema-definition-required-fields
+   #:schema-definition-items-schema
+   #:schema-definition-enum-values
+   #:schema-definition-min-value
+   #:schema-definition-max-value
+   #:schema-definition-min-items
+   #:schema-definition-max-items
+   #:schema-definition-unique-items-p
+   #:schema-definition-ref
+   #:schema-definition-cl-type
+
+   ;; Property definition structure
+   #:property-definition
+   #:make-property-definition
+   #:property-definition-name
+   #:property-definition-cl-name
+   #:property-definition-schema
+   #:property-definition-required-p
+   #:property-definition-description
+
+   ;; Schema parsing functions
+   #:parse-schema
+   #:validate-schema
+   #:schema-summary
+   #:json-name->lisp-name
+   #:operation-id->function-name
+   #:resolve-ref
+   #:resolve-schema-ref
+
+   ;; Hash-table access utilities
+   #:ht-get
+   #:ht-get-list
+
+   ;; --- Spec processor ---
+   ;; Configuration
+   #:*esi-spec-url*
+   #:*esi-spec-versions*
+   #:*spec-cache-directory*
+   #:*spec-cache-ttl*
+
+   ;; ESI spec structure
+   #:esi-spec
+   #:esi-spec-title
+   #:esi-spec-version
+   #:esi-spec-base-path
+   #:esi-spec-host
+   #:esi-spec-schemes
+   #:esi-spec-endpoints
+   #:esi-spec-global-parameters
+   #:esi-spec-security-definitions
+   #:esi-spec-categories
+   #:esi-spec-raw-spec
+   #:esi-spec-fetched-at
+   #:esi-spec-source-url
+
+   ;; Endpoint definition structure
+   #:endpoint-definition
+   #:make-endpoint-definition
+   #:endpoint-definition-operation-id
+   #:endpoint-definition-function-name
+   #:endpoint-definition-path
+   #:endpoint-definition-method
+   #:endpoint-definition-description
+   #:endpoint-definition-summary
+   #:endpoint-definition-category
+   #:endpoint-definition-parameters
+   #:endpoint-definition-path-parameters
+   #:endpoint-definition-query-parameters
+   #:endpoint-definition-header-parameters
+   #:endpoint-definition-body-parameter
+   #:endpoint-definition-response-schema
+   #:endpoint-definition-response-description
+   #:endpoint-definition-requires-auth-p
+   #:endpoint-definition-required-scopes
+   #:endpoint-definition-cache-duration
+   #:endpoint-definition-paginated-p
+   #:endpoint-definition-alternate-routes
+   #:endpoint-definition-deprecated-p
+   #:endpoint-definition-tags
+
+   ;; Parameter definition structure
+   #:parameter-definition
+   #:make-parameter-definition
+   #:parameter-definition-name
+   #:parameter-definition-cl-name
+   #:parameter-definition-location
+   #:parameter-definition-required-p
+   #:parameter-definition-description
+   #:parameter-definition-schema
+   #:parameter-definition-default-value
+   #:parameter-definition-enum-values
+
+   ;; Main processing entry points
+   #:fetch-and-process-esi-spec
+   #:process-raw-spec
+   #:download-esi-spec
+   #:load-cached-spec
+
+   ;; Spec querying
+   #:find-endpoint-by-id
+   #:find-endpoints-by-category
+   #:find-endpoints-by-method
+   #:find-authenticated-endpoints
+   #:find-public-endpoints
+   #:find-paginated-endpoints
    
-   ;; Code generation
+   ;; Type generation
+   #:generate-cl-type-definitions
+   #:generate-response-type-map
+
+   ;; Spec reporting
+   #:spec-summary
+   #:validate-esi-spec
+   #:compare-spec-versions
+   #:spec-version-summary
+
+   ;; --- Code generation (Phase 2 Task 2 - stubs) ---
    #:generate-endpoint-function
    #:generate-type-definitions
    #:generate-client-code
+   #:generate-api-functions
    
-   ;; API client
+   ;; --- API client (Phase 2 Task 3 - stubs) ---
    #:api-client
    #:make-api-client
    #:api-call
    #:api-get #:api-post #:api-put #:api-delete
    
-   ;; Endpoint registry
+   ;; --- Endpoint registry (Phase 2 Task 3 - stubs) ---
    #:register-endpoint
    #:find-endpoint
    #:list-endpoints))
@@ -427,7 +548,7 @@
                 #:make-cache-manager #:with-caching)
   (:import-from #:eve-gate.api
                 #:make-api-client #:api-call
-                #:load-openapi-spec #:generate-api-functions)
+                #:fetch-and-process-esi-spec #:generate-api-functions)
   (:import-from #:eve-gate.concurrent
                 #:make-parallel-client #:bulk-get #:bulk-process)
   (:export
