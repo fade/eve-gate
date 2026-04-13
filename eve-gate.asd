@@ -11,6 +11,7 @@
                #:alexandria       ; Common utilities
                #:local-time       ; Time handling
                #:cl-ppcre         ; Regular expressions
+               #:bordeaux-threads ; Thread synchronization
                #:ciao)            ; OAuth 2.0 client
   :pathname "src/"
   :serial nil
@@ -46,10 +47,11 @@
                ;; Authentication system
                (:module "auth"
                 :depends-on ("packages" "utils" "types" "core")
+                :serial t
                 :components
-                ((:file "oauth2")
-                 (:file "token-manager")
-                 (:file "scopes")))
+                ((:file "scopes")
+                 (:file "oauth2")
+                 (:file "token-manager")))
                
                ;; Caching layer
                (:module "cache"

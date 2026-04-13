@@ -167,24 +167,105 @@
 (defpackage #:eve-gate.auth
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core)
   (:export
-   ;; OAuth2 flow
+   ;; EVE SSO configuration
+   #:*eve-sso-auth-url*
+   #:*eve-sso-token-url*
+   #:*eve-sso-verify-url*
+   #:*eve-sso-auth-server*
+   #:*default-callback-port*
+   #:*default-redirect-uri*
+
+   ;; OAuth2 client
+   #:oauth-client
    #:make-oauth-client
+   #:oauth-client-client-id
+   #:oauth-client-scopes
+   #:oauth-client-redirect-uri
+
+   ;; OAuth2 flow
    #:get-authorization-url
    #:exchange-code-for-token
    #:refresh-access-token
-   
-   ;; Token management
-   #:access-token
-   #:refresh-token
-   #:token-expires-at
+   #:verify-access-token
+   #:authenticate-via-browser
+
+   ;; Auth conditions
+   #:eve-sso-error
+   #:eve-sso-error-type
+   #:eve-sso-token-expired
+   #:eve-sso-insufficient-scopes
+   #:eve-sso-required-scopes
+   #:eve-sso-granted-scopes
+   #:eve-sso-token-refresh-failed
+
+   ;; Auth middleware
+   #:make-auth-middleware
+   #:make-scope-checking-middleware
+
+   ;; Token info
+   #:token-info
+   #:token-info-access-token
+   #:token-info-refresh-token
+   #:token-info-expires-at
+   #:token-info-scopes
+   #:token-info-character-id
+   #:token-info-character-name
    #:token-expired-p
+   #:token-needs-refresh-p
+   #:token-valid-p
+   #:token-time-remaining
+
+   ;; Token manager
+   #:token-manager
+   #:make-token-manager
+   #:get-valid-access-token
    #:store-token
    #:load-token
-   
-   ;; Scopes
+   #:revoke-token
+   #:token-manager-authenticated-p
+   #:token-manager-character-id
+   #:token-manager-character-name
+   #:token-manager-scopes
+   #:token-manager-expires-at
+   #:token-manager-status
+   #:authenticate-and-store
+   #:restore-or-authenticate
+
+   ;; Token persistence
+   #:*token-storage-directory*
+   #:*refresh-threshold*
+   #:save-token-state
+   #:list-persisted-tokens
+
+   ;; Scopes - registry
    #:*available-scopes*
+   #:*esi-scope-registry*
+   #:*scope-categories*
+   #:*scope-count*
+
+   ;; Scopes - validation
+   #:valid-scope-p
    #:validate-scopes
-   #:scope-required-p))
+   #:scope-required-p
+   #:sufficient-scopes-p
+   #:missing-scopes
+
+   ;; Scopes - queries
+   #:scope-info
+   #:scope-category
+   #:scope-description
+   #:scopes-by-category
+   #:all-read-scopes
+   #:all-write-scopes
+   #:character-scopes
+   #:corporation-scopes
+
+   ;; Scopes - operations
+   #:merge-scopes
+   #:subtract-scopes
+   #:format-scopes-for-oauth
+   #:parse-scope-string
+   #:scope-summary))
 
 (defpackage #:eve-gate.cache  
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types #:eve-gate.core)
