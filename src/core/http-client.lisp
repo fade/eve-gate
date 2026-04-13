@@ -21,9 +21,10 @@
 ;;; Configuration defaults
 ;;; ---------------------------------------------------------------------------
 
-(defparameter *esi-base-url* "https://esi.evetech.net"
-  "Base URL for the EVE Swagger Interface.
-This is the Tranquility (main) server endpoint.")
+(defparameter *esi-base-url* "https://esi.evetech.net/latest"
+  "Base URL for the EVE Swagger Interface including version path.
+This is the Tranquility (main) server endpoint using the 'latest' stable route.
+Change to 'https://esi.evetech.net/dev' for development endpoints.")
 
 (defparameter *user-agent* "eve-gate/0.1.0 (Common Lisp; +https://github.com/fade/eve-gate)"
   "User-Agent header sent with all ESI requests.

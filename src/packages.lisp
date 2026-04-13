@@ -591,16 +591,266 @@
    #:show-category-functions
    #:generation-statistics
    
-   ;; --- API client (Phase 2 Task 3 - stubs) ---
-   #:api-client
-   #:make-api-client
-   #:api-call
-   #:api-get #:api-post #:api-put #:api-delete
-   
-   ;; --- Endpoint registry (Phase 2 Task 3 - stubs) ---
-   #:register-endpoint
-   #:find-endpoint
-   #:list-endpoints))
+    ;; --- API client ---
+    #:api-client
+    #:make-api-client
+    #:api-call
+    #:api-get #:api-post #:api-put #:api-delete
+    
+    ;; --- Endpoint registry ---
+    #:register-endpoint
+    #:find-endpoint
+    #:list-endpoints
+    
+    ;; --- Generated endpoint registry data (Phase 2 Task 3) ---
+    #:*endpoint-registry*
+    #:populate-endpoint-registry
+    #:lookup-endpoint
+    #:list-endpoints-by-category
+    
+    ;; --- Generated response types (Phase 2 Task 3) ---
+    #:*response-type-map*
+    #:populate-response-types
+    #:parse-endpoint-response
+    #:coerce-response-data
+    
+    ;; --- Generated ESI API functions (Phase 2 Task 3) ---
+    ;; 195 endpoint functions across 20 ESI categories
+    
+    ;; Alliances (6 functions)
+    #:get-alliances
+    #:get-alliances-alliance-id
+    #:get-alliances-alliance-id-contacts
+    #:get-alliances-alliance-id-contacts-labels
+    #:get-alliances-alliance-id-corporations
+    #:get-alliances-alliance-id-icons
+    
+    ;; Characters (63 functions)
+    #:delete-characters-character-id-contacts
+    #:delete-characters-character-id-fittings-fitting-id
+    #:delete-characters-character-id-mail-labels-label-id
+    #:delete-characters-character-id-mail-mail-id
+    #:get-characters-character-id
+    #:get-characters-character-id-agents-research
+    #:get-characters-character-id-assets
+    #:get-characters-character-id-attributes
+    #:get-characters-character-id-blueprints
+    #:get-characters-character-id-calendar
+    #:get-characters-character-id-calendar-event-id
+    #:get-characters-character-id-calendar-event-id-attendees
+    #:get-characters-character-id-clones
+    #:get-characters-character-id-contacts
+    #:get-characters-character-id-contacts-labels
+    #:get-characters-character-id-contracts
+    #:get-characters-character-id-contracts-contract-id-bids
+    #:get-characters-character-id-contracts-contract-id-items
+    #:get-characters-character-id-corporationhistory
+    #:get-characters-character-id-fatigue
+    #:get-characters-character-id-fittings
+    #:get-characters-character-id-fleet
+    #:get-characters-character-id-fw-stats
+    #:get-characters-character-id-implants
+    #:get-characters-character-id-industry-jobs
+    #:get-characters-character-id-killmails-recent
+    #:get-characters-character-id-location
+    #:get-characters-character-id-loyalty-points
+    #:get-characters-character-id-mail
+    #:get-characters-character-id-mail-labels
+    #:get-characters-character-id-mail-lists
+    #:get-characters-character-id-mail-mail-id
+    #:get-characters-character-id-medals
+    #:get-characters-character-id-mining
+    #:get-characters-character-id-notifications
+    #:get-characters-character-id-notifications-contacts
+    #:get-characters-character-id-online
+    #:get-characters-character-id-orders
+    #:get-characters-character-id-orders-history
+    #:get-characters-character-id-planets
+    #:get-characters-character-id-planets-planet-id
+    #:get-characters-character-id-portrait
+    #:get-characters-character-id-roles
+    #:get-characters-character-id-search
+    #:get-characters-character-id-ship
+    #:get-characters-character-id-skillqueue
+    #:get-characters-character-id-skills
+    #:get-characters-character-id-standings
+    #:get-characters-character-id-titles
+    #:get-characters-character-id-wallet
+    #:get-characters-character-id-wallet-journal
+    #:get-characters-character-id-wallet-transactions
+    #:post-characters-affiliation
+    #:post-characters-character-id-assets-locations
+    #:post-characters-character-id-assets-names
+    #:post-characters-character-id-contacts
+    #:post-characters-character-id-cspa
+    #:post-characters-character-id-fittings
+    #:post-characters-character-id-mail
+    #:post-characters-character-id-mail-labels
+    #:put-characters-character-id-calendar-event-id
+    #:put-characters-character-id-contacts
+    #:put-characters-character-id-mail-mail-id
+    
+    ;; Contracts (3 functions)
+    #:get-contracts-public-bids-contract-id
+    #:get-contracts-public-items-contract-id
+    #:get-contracts-public-region-id
+    
+    ;; Corporation - mining (3 functions)
+    #:get-corporation-corporation-id-mining-extractions
+    #:get-corporation-corporation-id-mining-observers
+    #:get-corporation-corporation-id-mining-observers-observer-id
+    
+    ;; Corporations (39 functions)
+    #:get-corporations-corporation-id
+    #:get-corporations-corporation-id-alliancehistory
+    #:get-corporations-corporation-id-assets
+    #:get-corporations-corporation-id-blueprints
+    #:get-corporations-corporation-id-contacts
+    #:get-corporations-corporation-id-contacts-labels
+    #:get-corporations-corporation-id-containers-logs
+    #:get-corporations-corporation-id-contracts
+    #:get-corporations-corporation-id-contracts-contract-id-bids
+    #:get-corporations-corporation-id-contracts-contract-id-items
+    #:get-corporations-corporation-id-customs-offices
+    #:get-corporations-corporation-id-divisions
+    #:get-corporations-corporation-id-facilities
+    #:get-corporations-corporation-id-fw-stats
+    #:get-corporations-corporation-id-icons
+    #:get-corporations-corporation-id-industry-jobs
+    #:get-corporations-corporation-id-killmails-recent
+    #:get-corporations-corporation-id-medals
+    #:get-corporations-corporation-id-medals-issued
+    #:get-corporations-corporation-id-members
+    #:get-corporations-corporation-id-members-limit
+    #:get-corporations-corporation-id-members-titles
+    #:get-corporations-corporation-id-membertracking
+    #:get-corporations-corporation-id-orders
+    #:get-corporations-corporation-id-orders-history
+    #:get-corporations-corporation-id-roles
+    #:get-corporations-corporation-id-roles-history
+    #:get-corporations-corporation-id-shareholders
+    #:get-corporations-corporation-id-standings
+    #:get-corporations-corporation-id-starbases
+    #:get-corporations-corporation-id-starbases-starbase-id
+    #:get-corporations-corporation-id-structures
+    #:get-corporations-corporation-id-titles
+    #:get-corporations-corporation-id-wallets
+    #:get-corporations-corporation-id-wallets-division-journal
+    #:get-corporations-corporation-id-wallets-division-transactions
+    #:get-corporations-npccorps
+    #:post-corporations-corporation-id-assets-locations
+    #:post-corporations-corporation-id-assets-names
+    
+    ;; Dogma (5 functions)
+    #:get-dogma-attributes
+    #:get-dogma-attributes-attribute-id
+    #:get-dogma-dynamic-items-type-id-item-id
+    #:get-dogma-effects
+    #:get-dogma-effects-effect-id
+    
+    ;; Fleets (13 functions)
+    #:delete-fleets-fleet-id-members-member-id
+    #:delete-fleets-fleet-id-squads-squad-id
+    #:delete-fleets-fleet-id-wings-wing-id
+    #:get-fleets-fleet-id
+    #:get-fleets-fleet-id-members
+    #:get-fleets-fleet-id-wings
+    #:post-fleets-fleet-id-members
+    #:post-fleets-fleet-id-wings
+    #:post-fleets-fleet-id-wings-wing-id-squads
+    #:put-fleets-fleet-id
+    #:put-fleets-fleet-id-members-member-id
+    #:put-fleets-fleet-id-squads-squad-id
+    #:put-fleets-fleet-id-wings-wing-id
+    
+    ;; Faction Warfare (6 functions)
+    #:get-fw-leaderboards
+    #:get-fw-leaderboards-characters
+    #:get-fw-leaderboards-corporations
+    #:get-fw-stats
+    #:get-fw-systems
+    #:get-fw-wars
+    
+    ;; Incursions (1 function)
+    #:get-incursions
+    
+    ;; Industry (2 functions)
+    #:get-industry-facilities
+    #:get-industry-systems
+    
+    ;; Insurance (1 function)
+    #:get-insurance-prices
+    
+    ;; Killmails (1 function)
+    #:get-killmails-killmail-id-killmail-hash
+    
+    ;; Loyalty (1 function)
+    #:get-loyalty-stores-corporation-id-offers
+    
+    ;; Markets (7 functions)
+    #:get-markets-groups
+    #:get-markets-groups-market-group-id
+    #:get-markets-prices
+    #:get-markets-region-id-history
+    #:get-markets-region-id-orders
+    #:get-markets-region-id-types
+    #:get-markets-structures-structure-id
+    
+    ;; Route (1 function)
+    #:get-route-origin-destination
+    
+    ;; Sovereignty (3 functions)
+    #:get-sovereignty-campaigns
+    #:get-sovereignty-map
+    #:get-sovereignty-structures
+    
+    ;; Status (1 function)
+    #:get-status
+    
+    ;; UI (5 functions)
+    #:post-ui-autopilot-waypoint
+    #:post-ui-openwindow-contract
+    #:post-ui-openwindow-information
+    #:post-ui-openwindow-marketdetails
+    #:post-ui-openwindow-newmail
+    
+    ;; Universe (31 functions)
+    #:get-universe-ancestries
+    #:get-universe-asteroid-belts-asteroid-belt-id
+    #:get-universe-bloodlines
+    #:get-universe-categories
+    #:get-universe-categories-category-id
+    #:get-universe-constellations
+    #:get-universe-constellations-constellation-id
+    #:get-universe-factions
+    #:get-universe-graphics
+    #:get-universe-graphics-graphic-id
+    #:get-universe-groups
+    #:get-universe-groups-group-id
+    #:get-universe-moons-moon-id
+    #:get-universe-planets-planet-id
+    #:get-universe-races
+    #:get-universe-regions
+    #:get-universe-regions-region-id
+    #:get-universe-schematics-schematic-id
+    #:get-universe-stargates-stargate-id
+    #:get-universe-stars-star-id
+    #:get-universe-stations-station-id
+    #:get-universe-structures
+    #:get-universe-structures-structure-id
+    #:get-universe-system-jumps
+    #:get-universe-system-kills
+    #:get-universe-systems
+    #:get-universe-systems-system-id
+    #:get-universe-types
+    #:get-universe-types-type-id
+    #:post-universe-ids
+    #:post-universe-names
+    
+    ;; Wars (3 functions)
+    #:get-wars
+    #:get-wars-war-id
+    #:get-wars-war-id-killmails))
 
 (defpackage #:eve-gate.concurrent
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types 

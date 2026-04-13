@@ -63,18 +63,48 @@
                  (:file "database-cache")
                  (:file "cache-manager")))
                
-                ;; API generation and endpoints
-                (:module "api"
-                 :depends-on ("packages" "utils" "types" "core" "auth" "cache")
-                 :components
-                 ((:file "schema-parser")
-                  (:file "spec-processor" :depends-on ("schema-parser"))
-                  (:file "validation" :depends-on ("schema-parser" "spec-processor"))
-                  (:file "templates" :depends-on ("schema-parser" "spec-processor" "validation"))
-                  (:file "code-generator" :depends-on ("schema-parser" "spec-processor"
-                                                       "validation" "templates"))
-                  (:file "endpoint-registry" :depends-on ("spec-processor"))
-                  (:file "api-client" :depends-on ("endpoint-registry"))))
+                 ;; API generation and endpoints
+                 (:module "api"
+                  :depends-on ("packages" "utils" "types" "core" "auth" "cache")
+                  :components
+                  ((:file "schema-parser")
+                   (:file "spec-processor" :depends-on ("schema-parser"))
+                   (:file "validation" :depends-on ("schema-parser" "spec-processor"))
+                   (:file "templates" :depends-on ("schema-parser" "spec-processor" "validation"))
+                   (:file "code-generator" :depends-on ("schema-parser" "spec-processor"
+                                                        "validation" "templates"))
+                   (:file "endpoint-registry" :depends-on ("spec-processor"))
+                   (:file "api-client" :depends-on ("endpoint-registry"))
+                   ;; Generated ESI API functions (Phase 2 Task 3)
+                   ;; 195 endpoint functions organized by ESI category
+                   (:module "generated"
+                    :depends-on ("schema-parser" "spec-processor" "validation"
+                                 "templates" "code-generator" "endpoint-registry" "api-client")
+                    :components
+                    (;; Infrastructure files
+                     (:file "endpoint-registry-data")
+                     (:file "response-types")
+                     ;; Category files (alphabetical, 20 ESI categories)
+                     (:file "alliances")
+                     (:file "characters")
+                     (:file "contracts")
+                     (:file "corporation")
+                     (:file "corporations")
+                     (:file "dogma")
+                     (:file "fleets")
+                     (:file "fw")
+                     (:file "incursions")
+                     (:file "industry")
+                     (:file "insurance")
+                     (:file "killmails")
+                     (:file "loyalty")
+                     (:file "markets")
+                     (:file "route")
+                     (:file "sovereignty")
+                     (:file "status")
+                     (:file "ui")
+                     (:file "universe")
+                     (:file "wars")))))
                
                ;; Concurrent operations
                (:module "concurrent"
