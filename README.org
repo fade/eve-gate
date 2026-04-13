@@ -20,11 +20,11 @@ rate limiting, and parallel request execution.
 
 * Requirements
 
-| Requirement        | Notes                                                  |
-|--------------------+--------------------------------------------------------|
-| SBCL               | Tested on current releases; other implementations may work |
-| Quicklisp          | For library loading                                    |
-| EVE Developer App  | *You must register your own* (see below)               |
+| Requirement       | Notes                                                      |
+|-------------------+------------------------------------------------------------|
+| SBCL              | Tested on current releases; other implementations may work |
+| Quicklisp         | For library loading                                        |
+| EVE Developer App | *You must register your own* (see below)                     |
 
 ** EVE Developer Application Registration
 
@@ -154,13 +154,13 @@ Eve-gate organizes functionality into several packages:
 
 High-level client interface.
 
-| Symbol              | Type     | Description                          |
-|---------------------+----------+--------------------------------------|
-| =make-eve-client=     | function | Create configured EVE client         |
-| =eve-client=          | class    | Main client object                   |
-| =with-client=         | macro    | Execute with temporary client        |
-| =authenticate-client= | function | Authenticate with OAuth code         |
-| =configure-client=    | function | Runtime configuration updates        |
+| Symbol              | Type     | Description                   |
+|---------------------+----------+-------------------------------|
+| =make-eve-client=     | function | Create configured EVE client  |
+| =eve-client=          | class    | Main client object            |
+| =with-client=         | macro    | Execute with temporary client |
+| =authenticate-client= | function | Authenticate with OAuth code  |
+| =configure-client=    | function | Runtime configuration updates |
 
 ** eve-gate.api (API Functions)
 
@@ -181,89 +181,89 @@ High-level client interface.
 
 Key utilities:
 
-| Symbol            | Type     | Description                              |
-|-------------------+----------+------------------------------------------|
-| =make-api-client=   | function | Create API client                        |
-| =api-call=          | function | Generic call by operation-id             |
-| =api-get/post/put/delete= | function | HTTP verb convenience methods      |
-| =find-endpoint=     | function | Look up endpoint metadata                |
-| =list-endpoints=    | function | List endpoints by category               |
+| Symbol                  | Type     | Description                   |
+|-------------------------+----------+-------------------------------|
+| =make-api-client=         | function | Create API client             |
+| =api-call=                | function | Generic call by operation-id  |
+| =api-get/post/put/delete= | function | HTTP verb convenience methods |
+| =find-endpoint=           | function | Look up endpoint metadata     |
+| =list-endpoints=          | function | List endpoints by category    |
 
 ** eve-gate.auth (Authentication)
 
 OAuth 2.0 with EVE SSO.
 
-| Symbol                   | Type      | Description                        |
-|--------------------------+-----------+------------------------------------|
-| =make-oauth-client=        | function  | Create OAuth client                |
-| =get-authorization-url=    | function  | Generate SSO login URL             |
-| =exchange-code-for-token=  | function  | Exchange auth code for tokens      |
-| =refresh-access-token=     | function  | Refresh expired token              |
-| =make-token-manager=       | function  | Create auto-refreshing manager     |
-| =valid-scope-p=            | function  | Check if scope is valid            |
-| =scopes-by-category=       | function  | List scopes by category            |
+| Symbol                  | Type     | Description                    |
+|-------------------------+----------+--------------------------------|
+| =make-oauth-client=       | function | Create OAuth client            |
+| =get-authorization-url=   | function | Generate SSO login URL         |
+| =exchange-code-for-token= | function | Exchange auth code for tokens  |
+| =refresh-access-token=    | function | Refresh expired token          |
+| =make-token-manager=      | function | Create auto-refreshing manager |
+| =valid-scope-p=           | function | Check if scope is valid        |
+| =scopes-by-category=      | function | List scopes by category        |
 
 ** eve-gate.cache (Caching)
 
 Multi-tier caching with ETag support.
 
-| Symbol               | Type     | Description                           |
-|----------------------+----------+---------------------------------------|
-| =make-cache-manager=   | function | Create cache manager                  |
-| =cache-get/put/delete= | function | Basic cache operations                |
-| =with-caching=         | macro    | Execute with automatic caching        |
-| =cache-summary=        | function | REPL-friendly cache statistics        |
-| =cache-purge-expired=  | function | Remove expired entries                |
+| Symbol               | Type     | Description                    |
+|----------------------+----------+--------------------------------|
+| =make-cache-manager=   | function | Create cache manager           |
+| =cache-get/put/delete= | function | Basic cache operations         |
+| =with-caching=         | macro    | Execute with automatic caching |
+| =cache-summary=        | function | REPL-friendly cache statistics |
+| =cache-purge-expired=  | function | Remove expired entries         |
 
 ** eve-gate.core (Core HTTP)
 
 HTTP client and middleware.
 
-| Symbol                  | Type     | Description                         |
-|-------------------------+----------+-------------------------------------|
-| =make-http-client=        | function | Create HTTP client                  |
-| =http-request=            | function | Make HTTP request                   |
-| =make-middleware=         | function | Create middleware component         |
-| =make-default-middleware-stack= | function | Standard middleware stack     |
-| =esi-error=               | condition | Base ESI error condition            |
-| =esi-rate-limit-exceeded= | condition | Rate limit error                    |
+| Symbol                        | Type      | Description                 |
+|-------------------------------+-----------+-----------------------------|
+| =make-http-client=              | function  | Create HTTP client          |
+| =http-request=                  | function  | Make HTTP request           |
+| =make-middleware=               | function  | Create middleware component |
+| =make-default-middleware-stack= | function  | Standard middleware stack   |
+| =esi-error=                     | condition | Base ESI error condition    |
+| =esi-rate-limit-exceeded=       | condition | Rate limit error            |
 
 ** eve-gate.types (Type System)
 
 EVE Online entity types and validation.
 
-| Symbol                | Type     | Description                          |
-|-----------------------+----------+--------------------------------------|
-| =character-id=          | type     | Character ID (32-bit)                |
-| =corporation-id=        | type     | Corporation ID (32-bit)              |
-| =alliance-id=           | type     | Alliance ID (32-bit)                 |
-| =type-id=               | type     | Item type ID (32-bit)                |
-| =structure-id=          | type     | Structure ID (64-bit)                |
-| =validate-character-id= | function | Validate character ID                |
-| =parse-esi-timestamp=   | function | Parse ESI timestamp string           |
+| Symbol                | Type     | Description                |
+|-----------------------+----------+----------------------------|
+| =character-id=          | type     | Character ID (32-bit)      |
+| =corporation-id=        | type     | Corporation ID (32-bit)    |
+| =alliance-id=           | type     | Alliance ID (32-bit)       |
+| =type-id=               | type     | Item type ID (32-bit)      |
+| =structure-id=          | type     | Structure ID (64-bit)      |
+| =validate-character-id= | function | Validate character ID      |
+| =parse-esi-timestamp=   | function | Parse ESI timestamp string |
 
 ** eve-gate.concurrent (Parallel Operations)
 
 Rate limiting and bulk operations.
 
-| Symbol                | Type     | Description                          |
-|-----------------------+----------+--------------------------------------|
-| =make-token-bucket=     | function | Create rate limiter                  |
-| =bulk-get=              | function | Parallel GET requests                |
-| =bulk-operations=       | function | Execute bulk operations              |
-| =with-rate-limiting=    | macro    | Execute with rate limiting           |
+| Symbol             | Type     | Description                |
+|--------------------+----------+----------------------------|
+| =make-token-bucket=  | function | Create rate limiter        |
+| =bulk-get=           | function | Parallel GET requests      |
+| =bulk-operations=    | function | Execute bulk operations    |
+| =with-rate-limiting= | macro    | Execute with rate limiting |
 
 ** eve-gate.utils (Utilities)
 
 Logging, configuration, and monitoring.
 
-| Symbol                      | Type     | Description                      |
-|-----------------------------+----------+----------------------------------|
-| =log-info/warn/error=         | function | Structured logging               |
-| =initialize-config-manager=   | function | Initialize configuration         |
-| =config-get=                  | function | Get configuration value          |
-| =initialize-health-monitoring= | function | Start health monitoring         |
-| =quick-health=                | function | Quick system health check        |
+| Symbol                       | Type     | Description               |
+|------------------------------+----------+---------------------------|
+| =log-info/warn/error=          | function | Structured logging        |
+| =initialize-config-manager=    | function | Initialize configuration  |
+| =config-get=                   | function | Get configuration value   |
+| =initialize-health-monitoring= | function | Start health monitoring   |
+| =quick-health=                 | function | Quick system health check |
 
 * Configuration
 
@@ -275,13 +275,13 @@ Eve-gate supports multiple configuration sources with precedence:
 
 ** Environment Variables
 
-| Variable                | Description                              |
-|-------------------------+------------------------------------------|
-| =EVE_GATE_CLIENT_ID=      | OAuth client ID                          |
-| =EVE_GATE_CLIENT_SECRET=  | OAuth client secret                      |
-| =EVE_GATE_LOG_LEVEL=      | Log level (trace/debug/info/warn/error) |
-| =EVE_GATE_CACHE_ENABLED=  | Enable caching (true/false)              |
-| =EVE_GATE_DATASOURCE=     | ESI datasource (tranquility/singularity) |
+| Variable               | Description                              |
+|------------------------+------------------------------------------|
+| =EVE_GATE_CLIENT_ID=     | OAuth client ID                          |
+| =EVE_GATE_CLIENT_SECRET= | OAuth client secret                      |
+| =EVE_GATE_LOG_LEVEL=     | Log level (trace/debug/info/warn/error)  |
+| =EVE_GATE_CACHE_ENABLED= | Enable caching (true/false)              |
+| =EVE_GATE_DATASOURCE=    | ESI datasource (tranquility/singularity) |
 
 ** Configuration File
 
@@ -325,14 +325,14 @@ Eve-gate supports multiple configuration sources with precedence:
 │    .auth    │      │   .cache    │      │ .concurrent │
 │ OAuth 2.0   │      │ Multi-tier  │      │ Rate limit  │
 │ Token mgmt  │      │ ETag cache  │      │ Bulk ops    │
-└──────┬──────┘      └──────┬──────┘      └──────┬──────┘
-       │                    │                    │
+└──────┬──────┘      └───────┬─────┘      └──────┬──────┘
+       │                     │                   │
        └─────────────────────────────────────────┘
                              │
                              ▼
 ┌────────────────────────────────────────────────────────────┐
-│                      eve-gate.core                          │
-│  HTTP client, middleware pipeline, conditions               │
+│                      eve-gate.core                         │
+│  HTTP client, middleware pipeline, conditions              │
 └────────────────────────────┬───────────────────────────────┘
                              │
        ┌─────────────────────┼─────────────────────┐
@@ -350,17 +350,17 @@ Eve-gate supports multiple configuration sources with precedence:
 
 Eve-gate provides 65 scopes organized by category:
 
-| Category    | Count | Examples                                    |
-|-------------+-------+---------------------------------------------|
-| Character   |    25 | =esi-characters.read_*=, =esi-skills.*=         |
-| Corporation |    18 | =esi-corporations.read_*=, =esi-industry.*=     |
-| Wallet      |     4 | =esi-wallet.read_character_wallet.v1=          |
-| Assets      |     2 | =esi-assets.read_assets.v1=                    |
-| Mail        |     4 | =esi-mail.*=                                   |
-| Fleets      |     2 | =esi-fleets.*=                                 |
-| UI          |     4 | =esi-ui.*=                                     |
+| Category    | Count | Examples                                             |
+|-------------+-------+------------------------------------------------------|
+| Character   |    25 | =esi-characters.read_*=, =esi-skills.*=                  |
+| Corporation |    18 | =esi-corporations.read_*=, =esi-industry.*=              |
+| Wallet      |     4 | =esi-wallet.read_character_wallet.v1=                  |
+| Assets      |     2 | =esi-assets.read_assets.v1=                            |
+| Mail        |     4 | =esi-mail.*=                                           |
+| Fleets      |     2 | =esi-fleets.*=                                         |
+| UI          |     4 | =esi-ui.*=                                             |
 | Markets     |     2 | =esi-markets.read_*=, =esi-markets.structure_markets.v1= |
-| Other       |     4 | =esi-search.*=, =esi-bookmarks.*=               |
+| Other       |     4 | =esi-search.*=, =esi-bookmarks.*=                        |
 
 List all scopes:
 
