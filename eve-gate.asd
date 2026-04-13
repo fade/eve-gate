@@ -110,13 +110,17 @@
                      (:file "universe")
                      (:file "wars")))))
                
-               ;; Concurrent operations
-               (:module "concurrent"
-                :depends-on ("packages" "utils" "types" "core" "auth" "cache" "api")
-                :components
-                ((:file "bulk-operations")
-                 (:file "parallel-client")
-                 (:file "job-queue")))
+                ;; Concurrent operations
+                (:module "concurrent"
+                 :depends-on ("packages" "utils" "types" "core" "auth" "cache" "api")
+                 :components
+                 ((:file "rate-limiter")
+                  (:file "request-queue" :depends-on ("rate-limiter"))
+                  (:file "throttling" :depends-on ("rate-limiter" "request-queue"))
+                  (:file "engine" :depends-on ("rate-limiter" "request-queue" "throttling"))
+                  (:file "bulk-operations" :depends-on ("engine"))
+                  (:file "parallel-client" :depends-on ("engine"))
+                  (:file "job-queue" :depends-on ("request-queue"))))
                
                ;; Main interface
                (:file "main" 

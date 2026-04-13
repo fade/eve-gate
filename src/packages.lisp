@@ -1209,7 +1209,115 @@
 (defpackage #:eve-gate.concurrent
   (:use #:cl #:alexandria #:eve-gate.utils #:eve-gate.types 
         #:eve-gate.core #:eve-gate.auth #:eve-gate.cache #:eve-gate.api)
+  (:import-from #:bordeaux-threads)
+  (:import-from #:cl-ppcre)
   (:export
+   ;; --- Token bucket (rate-limiter.lisp) ---
+   #:token-bucket
+   #:make-token-bucket
+   #:bucket-try-acquire
+   #:bucket-acquire
+   #:bucket-tokens-available
+   #:bucket-status
+   
+   ;; --- ESI rate limiter (rate-limiter.lisp) ---
+   #:esi-rate-limiter
+   #:make-esi-rate-limiter
+   #:configure-endpoint-rate
+   #:rate-limit-acquire
+   #:rate-limit-status
+   #:rate-limiter-record-response
+   #:rate-limiter-statistics
+   #:reset-rate-limiter-stats
+   #:error-backoff-remaining
+   #:*default-esi-rate-configs*
+   #:*default-character-rate-limit*
+   #:*default-character-burst*
+   
+   ;; --- Request queue (request-queue.lisp) ---
+   ;; Priority constants
+   #:+priority-critical+
+   #:+priority-high+
+   #:+priority-normal+
+   #:+priority-low+
+   #:+priority-bulk+
+   
+   ;; Queued request
+   #:queued-request
+   #:make-queued-request
+   #:queued-request-id
+   #:queued-request-priority
+   #:queued-request-path
+   #:queued-request-method
+   #:queued-request-params
+   #:queued-request-character-id
+   #:queued-request-complete-p
+   #:queued-request-expired-p
+   #:request-expired-p
+   #:request-wait-time
+   #:complete-request
+   #:fail-request
+   #:wait-for-request
+   
+   ;; Request queue
+   #:request-queue
+   #:make-request-queue
+   #:enqueue-request
+   #:dequeue-request
+   #:pause-queue
+   #:resume-queue
+   #:shutdown-queue
+   #:clear-queue
+   #:queue-depth
+   #:queue-statistics
+   #:queue-status
+   
+   ;; --- Throttling (throttling.lisp) ---
+   ;; Global instances
+   #:*esi-rate-limiter*
+   #:*esi-request-queue*
+   #:ensure-rate-limiter
+   #:ensure-request-queue
+   
+   ;; Initialization
+   #:initialize-throttling
+   #:shutdown-throttling
+   
+   ;; Middleware constructors
+   #:make-throttling-middleware
+   #:make-response-tracking-middleware
+   #:make-420-retry-middleware
+   #:make-throttling-middleware-stack
+   
+   ;; Throttled client
+   #:make-throttled-http-client
+   
+   ;; Status
+   #:throttling-status
+   #:throttling-healthy-p
+   
+   ;; --- Concurrent engine (engine.lisp) ---
+   #:concurrent-engine
+   #:make-concurrent-engine
+   #:start-engine
+   #:stop-engine
+   
+   ;; Request submission
+   #:submit-request
+   #:submit-and-wait
+   #:bulk-submit
+   #:bulk-submit-and-wait
+   
+   ;; Convenience functions
+   #:fetch-all-pages
+   #:fetch-multiple-ids
+   
+   ;; Metrics
+   #:engine-metrics
+   #:engine-status
+   #:reset-engine-metrics
+   
+   ;; --- Legacy stubs (bulk-operations.lisp, parallel-client.lisp, job-queue.lisp) ---
    ;; Bulk operations
    #:bulk-get
    #:bulk-post
