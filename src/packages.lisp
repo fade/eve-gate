@@ -190,11 +190,149 @@
    #:with-debug-context
    #:log-system-diagnostics
    
-   ;; Configuration  
+   ;; --- Configuration Schema and Validation (configuration.lisp) ---
+   ;; Schema
+   #:config-schema-entry
+   #:make-config-schema-entry
+   #:config-schema-entry-key
+   #:config-schema-entry-type
+   #:config-schema-entry-default
+   #:config-schema-entry-description
+   #:config-schema-entry-category
+   #:config-schema-entry-required-p
+   #:config-schema-entry-hot-reload-p
+   #:config-schema-entry-env-var
+   #:config-schema-entry-constraints
+   #:*config-schema*
+   #:define-config-key
+   
+   ;; Conditions
+   #:config-validation-error
+   #:config-validation-error-key
+   #:config-validation-error-value
+   #:config-validation-error-reason
+   #:config-validation-error-expected
+   #:config-missing-error
+   
+   ;; Default configs and environment profiles
    #:*default-config*
-   #:load-config
+   #:*development-config*
+   #:*staging-config*
+   #:*production-config*
+   #:*environment-configs*
+   #:*current-environment*
+   
+   ;; Core access functions
    #:get-config-value
    #:set-config-value
+   #:config-keys
+   #:load-config
+   #:merge-configs
+   #:validate-config
+   #:validate-config-value
+   
+   ;; Schema introspection
+   #:config-schema-for-key
+   #:config-keys-for-category
+   #:config-categories
+   #:hot-reloadable-keys
+   #:describe-config-key
+   #:config-schema-summary
+   #:diff-configs
+   
+   ;; --- Configuration Sources (config-sources.lisp) ---
+   ;; Source protocol
+   #:config-source
+   #:make-config-source
+   #:config-source-name
+   #:config-source-priority
+   #:config-source-reader-fn
+   #:config-source-reloadable-p
+   
+   ;; Source constructors
+   #:make-env-source
+   #:make-file-source
+   #:make-lisp-file-source
+   #:make-plist-source
+   
+   ;; Source reading
+   #:read-env-config
+   #:read-json-config-file
+   #:read-lisp-config-file
+   #:read-all-sources
+   #:reload-sources
+   
+   ;; Source discovery
+   #:find-config-files
+   #:auto-discover-sources
+   
+   ;; --- Configuration Integration (config-integration.lisp) ---
+   ;; Subsystem config struct
+   #:subsystem-config
+   #:make-subsystem-config
+   #:extract-subsystem-config
+   #:subsystem-config-http-timeout
+   #:subsystem-config-http-retries
+   #:subsystem-config-http-connect-timeout
+   #:subsystem-config-http-read-timeout
+   #:subsystem-config-http-pool-size
+   #:subsystem-config-cache-enabled-p
+   #:subsystem-config-cache-default-ttl
+   #:subsystem-config-log-level
+   #:subsystem-config-log-format
+   #:subsystem-config-worker-threads
+   #:subsystem-config-bulk-batch-size
+   #:subsystem-config-debug-mode-p
+   
+   ;; Application
+   #:apply-config
+   #:apply-logging-config
+   #:apply-performance-config
+   #:filter-hot-reloadable
+   
+   ;; Change detection
+   #:config-changes
+   #:classify-config-changes
+   #:log-config-changes
+   
+   ;; --- Configuration Manager (config-manager.lisp) ---
+   ;; Manager struct
+   #:config-manager
+   #:*config-manager*
+   #:config-manager-active-config
+   #:config-manager-environment
+   #:config-manager-sources
+   #:config-manager-subsystem-config
+   
+   ;; Initialization
+   #:initialize-config-manager
+   #:ensure-config-manager
+   #:shutdown-config-manager
+   
+   ;; Access API
+   #:config-get
+   #:config-set
+   #:config-getf
+   #:config-update
+   
+   ;; Hot reload
+   #:reload-config
+   
+   ;; Snapshots and rollback
+   #:config-rollback
+   #:config-snapshots
+   
+   ;; Change hooks
+   #:add-config-change-hook
+   #:remove-config-change-hook
+   
+   ;; Export and backup
+   #:export-config
+   #:save-config-to-file
+   
+   ;; REPL inspection
+   #:config-status
+   #:show-active-config
    
    ;; String utilities
    #:kebab-case

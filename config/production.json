@@ -1,0 +1,36 @@
+{
+  "esi-base-url": "https://esi.evetech.net",
+  "esi-version": "latest",
+  "user-agent": "eve-gate/0.1.0 (Common Lisp; +https://github.com/fade/eve-gate)",
+
+  "default-timeout": 30,
+  "default-retries": 3,
+  "connect-timeout": 10,
+  "read-timeout": 30,
+  "connection-pool-size": 20,
+  "keep-alive-timeout": 60,
+  "dns-cache-ttl": 600,
+
+  "error-limit-per-window": 100,
+  "error-limit-window": 60,
+  "burst-size": 150,
+  "sustained-rate": 20,
+
+  "cache-enabled": true,
+  "cache-default-ttl": 300,
+  "memory-cache-size": 5000,
+  "etag-cache-size": 50000,
+
+  "log-level": "warn",
+  "log-format": "json",
+  "log-destination": "file",
+
+  "worker-threads": 8,
+  "bulk-batch-size": 50,
+  "queue-max-size": 5000,
+
+  "debug-mode": false,
+  "mock-responses": false,
+  "request-logging": false,
+  "response-logging": false
+}

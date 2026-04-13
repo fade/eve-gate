@@ -28,6 +28,10 @@
                    (:file "esi-logger" :depends-on ("logging" "log-output"))
                    (:file "audit-logger" :depends-on ("logging"))
                    (:file "configuration")
+                   (:file "config-sources" :depends-on ("configuration" "logging"))
+                   (:file "config-integration" :depends-on ("configuration" "logging"))
+                   (:file "config-manager" :depends-on ("configuration" "config-sources"
+                                                        "config-integration" "logging"))
                    (:file "string-utils")
                    (:file "time-utils")
                    (:file "performance" :depends-on ("logging"))
