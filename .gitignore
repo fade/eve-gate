@@ -72,6 +72,10 @@ secrets.lisp
 *.conf
 !*.conf.example
 
+# Generated API code (regenerated from ESI spec)
+src/api/generated/
+src/api/generated/.generation-signatures.sexp
+
 # Documentation build
 docs/_build/
 docs/.doctrees/

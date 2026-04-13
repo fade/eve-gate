@@ -491,11 +491,105 @@
    #:compare-spec-versions
    #:spec-version-summary
 
-   ;; --- Code generation (Phase 2 Task 2 - stubs) ---
+   ;; --- Validation (Phase 2 Task 2) ---
+   ;; Configuration
+   #:*validate-parameters-p*
+   #:*coerce-parameters-p*
+   
+   ;; Validation result
+   #:validation-result
+   #:make-validation-result
+   #:validation-result-valid-p
+   #:validation-result-errors
+   #:validation-result-coerced-values
+   
+   ;; Validation functions
+   #:validate-api-parameters
+   #:validate-parameter-value
+   #:validate-value-against-schema
+   #:validate-required-parameters
+   
+   ;; Type coercion
+   #:coerce-parameter-value
+   #:coerce-to-integer
+   #:coerce-to-number
+   #:coerce-to-string
+   #:coerce-to-boolean
+   
+   ;; Parameter formatting
+   #:format-parameter-for-request
+   #:format-scalar-for-url
+   #:extract-path-parameter-values
+   #:extract-query-parameter-values
+   #:substitute-path-parameters
+   
+   ;; Validation form generation
+   #:generate-validation-form
+   
+   ;; --- Templates (Phase 2 Task 2) ---
+   ;; Configuration
+   #:*generated-function-package*
+   #:*include-deprecation-warnings*
+   #:*include-inline-validation*
+   #:*default-page-limit*
+   
+   ;; Function form generation
+   #:generate-endpoint-function-form
+   #:generate-lambda-list
+   #:generate-docstring
+   #:generate-function-body
+   
+   ;; Batch generation
+   #:generate-category-forms
+   #:generate-all-function-forms
+   #:generate-category-file-form
+   
+   ;; File writing
+   #:write-generated-form
+   #:write-generated-file
+   
+   ;; Change detection
+   #:endpoint-signature
+   #:category-signature
+   
+   ;; Naming utilities
+   #:endpoint-to-symbol
+   #:category-package-name
+   
+   ;; --- Code generator (Phase 2 Task 2) ---
+   ;; Configuration
+   #:*generated-code-directory*
+   
+   ;; Main entry points
+   #:generate-api-functions
+   #:generate-category-api
    #:generate-endpoint-function
    #:generate-type-definitions
    #:generate-client-code
-   #:generate-api-functions
+   
+   ;; Endpoint registry generation
+   #:generate-endpoint-registry-file
+   
+   ;; Response types generation
+   #:generate-response-types-file
+   #:parse-endpoint-response
+   
+   ;; Generation report
+   #:generation-report
+   #:make-generation-report
+   #:generation-report-total-endpoints
+   #:generation-report-total-categories
+   #:generation-report-functions-generated
+   #:generation-report-categories-generated
+   #:generation-report-files-written
+   #:generation-report-spec-version
+   #:generation-report-generated-at
+   #:print-generation-report
+   
+   ;; REPL utilities
+   #:show-generated-function
+   #:show-category-functions
+   #:generation-statistics
    
    ;; --- API client (Phase 2 Task 3 - stubs) ---
    #:api-client

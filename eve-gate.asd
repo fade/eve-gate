@@ -69,7 +69,10 @@
                  :components
                  ((:file "schema-parser")
                   (:file "spec-processor" :depends-on ("schema-parser"))
-                  (:file "code-generator" :depends-on ("schema-parser" "spec-processor"))
+                  (:file "validation" :depends-on ("schema-parser" "spec-processor"))
+                  (:file "templates" :depends-on ("schema-parser" "spec-processor" "validation"))
+                  (:file "code-generator" :depends-on ("schema-parser" "spec-processor"
+                                                       "validation" "templates"))
                   (:file "endpoint-registry" :depends-on ("spec-processor"))
                   (:file "api-client" :depends-on ("endpoint-registry"))))
                
