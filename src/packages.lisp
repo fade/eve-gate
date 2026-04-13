@@ -635,8 +635,209 @@
     #:quick-import
     #:round-trip-test
     
-    ;; Combined initialization
-    #:initialize-data-exchange))
+     ;; Combined initialization
+     #:initialize-data-exchange
+     
+     ;; --- Health monitoring (health.lisp) ---
+     ;; Health check result
+     #:health-check-result
+     #:make-health-check-result
+     #:health-check-result-name
+     #:health-check-result-status
+     #:health-check-result-message
+     #:health-check-result-details
+     #:health-check-result-latency-ms
+     #:health-check-result-timestamp
+     #:health-check-result-error
+     
+     ;; Health status utilities
+     #:health-status-severity
+     #:worst-health-status
+     
+     ;; Health check registry
+     #:register-health-check
+     #:unregister-health-check
+     #:list-health-checks
+     #:run-health-check
+     #:run-all-health-checks
+     
+     ;; System health composite
+     #:system-health
+     #:compute-system-health
+     #:system-health-status
+     #:system-health-checks
+     #:system-health-timestamp
+     #:system-health-uptime-seconds
+     #:system-health-summary
+     #:*system-start-time*
+     
+     ;; Health history
+     #:record-health-snapshot
+     #:health-history
+     #:health-trend
+     #:*health-history-max*
+     
+     ;; Built-in checks
+     #:check-performance-metrics-health
+     #:check-logging-health
+     #:check-configuration-health
+     #:check-memory-health
+     #:check-data-ops-health
+     
+     ;; Initialization
+     #:initialize-health-monitoring
+     #:ensure-health-monitoring
+     #:*health-system-initialized-p*
+     
+     ;; Background sweep
+     #:start-health-check-sweep
+     #:stop-health-check-sweep
+     #:*health-check-interval*
+     
+     ;; REPL utilities
+     #:print-system-health
+     #:format-uptime
+     #:quick-health
+     
+     ;; --- Performance monitoring (monitoring.lisp) ---
+     ;; Baselines
+     #:performance-baseline
+     #:capture-performance-baseline
+     #:get-baseline
+     #:*active-baseline*
+     
+     ;; Drift detection
+     #:drift-result
+     #:drift-result-metric-name
+     #:drift-result-baseline-value
+     #:drift-result-current-value
+     #:drift-result-drift-percent
+     #:drift-result-severity
+     #:detect-performance-drift
+     #:*drift-warning-threshold*
+     #:*drift-critical-threshold*
+     
+     ;; SLA monitoring
+     #:sla-target
+     #:make-sla-target
+     #:define-sla-target
+     #:evaluate-sla-target
+     #:evaluate-all-sla-targets
+     #:sla-compliance-report
+     #:sla-status
+     #:sla-status-target
+     #:sla-status-current-value
+     #:sla-status-compliant-p
+     #:sla-status-margin
+     #:*sla-targets*
+     
+     ;; Anomaly detection
+     #:anomaly
+     #:anomaly-metric-name
+     #:anomaly-current-value
+     #:anomaly-severity
+     #:anomaly-message
+     #:detect-anomalies
+     #:*anomaly-warning-sigma*
+     #:*anomaly-critical-sigma*
+     
+     ;; Dashboard metrics aggregation
+     #:aggregate-dashboard-metrics
+     
+     ;; REPL
+     #:monitoring-status
+     
+     ;; --- Alerting (alerting.lisp) ---
+     ;; Alert events
+     #:alert-event
+     #:alert-event-id
+     #:alert-event-name
+     #:alert-event-severity
+     #:alert-event-source
+     #:alert-event-message
+     #:alert-event-details
+     #:alert-event-timestamp
+     #:alert-event-acknowledged-p
+     
+     ;; Alert severity
+     #:alert-severity-value
+     #:severity>=
+     
+     ;; Alert rules
+     #:alert-rule
+     #:make-alert-rule
+     #:register-alert-rule
+     #:unregister-alert-rule
+     #:list-alert-rules
+     #:get-alert-rule
+     
+     ;; Notification channels
+     #:notification-channel
+     #:make-notification-channel
+     #:register-notification-channel
+     #:unregister-notification-channel
+     #:list-notification-channels
+     
+     ;; Built-in channels
+     #:make-log-notification-channel
+     #:make-console-notification-channel
+     #:make-webhook-notification-channel
+     #:make-callback-notification-channel
+     
+     ;; Alert firing and management
+     #:fire-alert
+     #:evaluate-alert-rules
+     
+     ;; Alert history and acknowledgment
+     #:alert-history
+     #:unacknowledged-alerts
+     #:acknowledge-alert
+     #:acknowledge-all-alerts
+     
+     ;; Built-in rules
+     #:make-health-degraded-alert-rule
+     #:make-high-error-rate-alert-rule
+     #:make-sla-violation-alert-rule
+     #:make-anomaly-detected-alert-rule
+     
+     ;; Initialization
+     #:initialize-alerting
+     #:ensure-alerting
+     #:*alerting-initialized-p*
+     
+     ;; REPL
+     #:alerting-status
+     
+     ;; --- Health API (health-api.lisp) ---
+     ;; Endpoint handlers
+     #:handle-health-check
+     #:handle-liveness-probe
+     #:handle-readiness-probe
+     #:handle-health-detail
+     #:handle-health-metrics
+     #:handle-health-history
+     #:handle-alert-status
+     
+     ;; Route dispatch
+     #:*health-api-routes*
+     #:dispatch-health-request
+     
+     ;; Testing
+     #:test-health-endpoints
+     
+     ;; --- Dashboard (dashboard.lisp) ---
+     ;; Main dashboard
+     #:dashboard
+     #:dashboard-snapshot
+     #:collect-dashboard-snapshot
+     
+     ;; Quick status
+     #:quick-status
+     #:compact-dashboard
+     
+     ;; Combined initialization
+     #:initialize-monitoring-subsystem
+     #:shutdown-monitoring-subsystem))
 
 (defpackage #:eve-gate.types
   (:use #:cl #:alexandria)

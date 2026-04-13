@@ -42,7 +42,14 @@
                    (:file "export" :depends-on ("logging" "audit-logger" "formats" "data-privacy"))
                    (:file "import" :depends-on ("logging" "audit-logger" "formats" "data-privacy"))
                    (:file "data-ops" :depends-on ("logging" "audit-logger" "configuration"
-                                                  "formats" "data-privacy" "export" "import"))))
+                                                   "formats" "data-privacy" "export" "import"))
+                   (:file "health" :depends-on ("logging" "performance" "configuration"
+                                                "memory-pool" "data-ops"))
+                   (:file "monitoring" :depends-on ("logging" "performance" "health"))
+                   (:file "alerting" :depends-on ("logging" "performance" "health" "monitoring"))
+                   (:file "health-api" :depends-on ("logging" "health" "monitoring" "alerting"))
+                   (:file "dashboard" :depends-on ("logging" "performance" "health"
+                                                   "monitoring" "alerting" "health-api"))))
                
                 ;; Type system
                 (:module "types" 
