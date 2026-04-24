@@ -273,6 +273,10 @@ Returns: The new token-info struct."
     (unless (token-info-character-name new-token)
       (setf (token-info-character-name new-token)
             (token-info-character-name current-token)))
+    ;; Preserve scopes if refresh didn't surface them and we had them before
+    (unless (token-info-scopes new-token)
+      (setf (token-info-scopes new-token)
+            (token-info-scopes current-token)))
     ;; Update manager state
     (setf (token-manager-token manager) new-token)
     ;; Persist if enabled

@@ -1340,6 +1340,7 @@
    #:exchange-code-for-token
    #:refresh-access-token
    #:verify-access-token
+   #:extract-jwt-scopes
    #:authenticate-via-browser
 
    ;; Auth conditions

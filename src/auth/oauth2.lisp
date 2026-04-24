@@ -266,9 +266,14 @@ Example:
           ;; Store the CIAO oauth2 object on our client for refresh later
           (setf (oauth-client-ciao-oauth oauth-client) ciao-oauth)
           ;; Extract token information
-          (let ((access-token (ciao:get-access-token ciao-oauth :re-acquire? nil))
-                (refresh-token (ciao:get-refresh-token ciao-oauth))
-                (scopes (slot-value ciao-oauth 'ciao::scopes)))
+          (let* ((access-token (ciao:get-access-token ciao-oauth :re-acquire? nil))
+                 (refresh-token (ciao:get-refresh-token ciao-oauth))
+                 (ciao-scopes (slot-value ciao-oauth 'ciao::scopes))
+                 (scopes (or (if (listp ciao-scopes) ciao-scopes
+                                 (when ciao-scopes (parse-scope-string ciao-scopes)))
+                             ;; Fallback: EVE SSO doesn't always return scopes
+                             ;; via the OAuth library — extract from the JWT.
+                             (extract-jwt-scopes access-token))))
             ;; Verify the token to get character info
             (multiple-value-bind (character-id character-name)
                 (verify-access-token access-token)
@@ -277,9 +282,7 @@ Example:
                             :refresh-token refresh-token
                             :expires-in (compute-expires-in ciao-oauth now)
                             :token-type "Bearer"
-                            :scopes (if (listp scopes) scopes
-                                        (when scopes
-                                          (parse-scope-string scopes)))
+                            :scopes scopes
                             :character-id character-id
                             :character-name character-name
                             :obtained-at now)))
@@ -341,15 +344,18 @@ Example:
         ;; Extract the refreshed token information
         (let* ((access-token (ciao:get-access-token ciao-oauth :re-acquire? nil))
                (refresh-token (ciao:get-refresh-token ciao-oauth))
-               (scopes (slot-value ciao-oauth 'ciao::scopes))
+               (ciao-scopes (slot-value ciao-oauth 'ciao::scopes))
+               (scopes (or (if (listp ciao-scopes) ciao-scopes
+                               (when ciao-scopes (parse-scope-string ciao-scopes)))
+                           ;; Fallback: EVE SSO doesn't always return scopes
+                           ;; via the OAuth library — extract from the JWT.
+                           (extract-jwt-scopes access-token)))
                (token-info
                  (list :access-token access-token
                        :refresh-token refresh-token
                        :expires-in (compute-expires-in ciao-oauth now)
                        :token-type "Bearer"
-                       :scopes (if (listp scopes) scopes
-                                   (when scopes
-                                     (parse-scope-string scopes)))
+                       :scopes scopes
                        :obtained-at now)))
           ;; Verify to get character info
           (handler-case
@@ -408,6 +414,57 @@ Signals EVE-SSO-ERROR if verification fails."
 ;;; ---------------------------------------------------------------------------
 ;;; Internal helpers
 ;;; ---------------------------------------------------------------------------
+
+(defun %base64url-decode-to-string (segment)
+  "Decode a base64url-encoded JWT segment to a UTF-8 string.
+
+SEGMENT: Base64url string (uses -/_ and may lack padding).
+
+Returns: Decoded string, or NIL on decode failure."
+  (handler-case
+      (let* ((std (map 'string
+                       (lambda (c)
+                         (case c (#\- #\+) (#\_ #\/) (t c)))
+                       segment))
+             (pad-needed (mod (- 4 (mod (length std) 4)) 4))
+             (padded (if (zerop pad-needed)
+                         std
+                         (concatenate 'string std
+                                      (make-string pad-needed :initial-element #\=))))
+             (bytes (cl-base64:base64-string-to-usb8-array padded)))
+        (babel:octets-to-string bytes :encoding :utf-8))
+    (error () nil)))
+
+(defun extract-jwt-scopes (access-token)
+  "Extract the list of granted scope strings from the JWT `scp` claim.
+
+EVE SSO access tokens are RS256-signed JWTs whose payload includes
+an `scp` claim with the granted scopes. For a single scope the
+payload encodes `scp` as a string; for multiple scopes it's an
+array.
+
+ACCESS-TOKEN: A three-segment JWT string (`header.payload.signature`).
+
+Returns: A list of scope strings, or NIL if the token cannot be
+decoded or has no `scp` claim. This is a best-effort fallback used
+when the OAuth library does not surface scopes separately — it does
+not verify the signature, so callers must have already confirmed
+token authenticity via EVE SSO (e.g. VERIFY-ACCESS-TOKEN)."
+  (when (stringp access-token)
+    (let ((parts (cl-ppcre:split "\\." access-token)))
+      (when (= (length parts) 3)
+        (let ((json (%base64url-decode-to-string (second parts))))
+          (when json
+            (handler-case
+                (let* ((parsed (com.inuoe.jzon:parse json))
+                       (scp (and (hash-table-p parsed) (gethash "scp" parsed))))
+                  (cond
+                    ((null scp) nil)
+                    ((stringp scp) (parse-scope-string scp))
+                    ((listp scp) (copy-list scp))
+                    ((vectorp scp) (coerce scp 'list))
+                    (t nil)))
+              (error () nil))))))))
 
 (defun compute-expires-in (ciao-oauth obtained-at)
   "Compute remaining seconds until token expiration.
@@ -526,7 +583,12 @@ Example:
           (let* ((now (get-universal-time))
                  (access-token (ciao:get-access-token ciao-oauth :re-acquire? nil))
                  (refresh-token (ciao:get-refresh-token ciao-oauth))
-                 (scopes (slot-value ciao-oauth 'ciao::scopes)))
+                 (ciao-scopes (slot-value ciao-oauth 'ciao::scopes))
+                 (scopes (or (if (listp ciao-scopes) ciao-scopes
+                                 (when ciao-scopes (parse-scope-string ciao-scopes)))
+                             ;; Fallback: EVE SSO doesn't always return scopes
+                             ;; via the OAuth library — extract from the JWT.
+                             (extract-jwt-scopes access-token))))
             (multiple-value-bind (character-id character-name)
                 (verify-access-token access-token)
               (let ((token-info
@@ -534,9 +596,7 @@ Example:
                             :refresh-token refresh-token
                             :expires-in (compute-expires-in ciao-oauth now)
                             :token-type "Bearer"
-                            :scopes (if (listp scopes) scopes
-                                        (when scopes
-                                          (parse-scope-string scopes)))
+                            :scopes scopes
                             :character-id character-id
                             :character-name character-name
                             :obtained-at now)))

@@ -11,6 +11,8 @@
                         #:alexandria ; Common utilities
                         #:local-time ; Time handling
                         #:cl-ppcre ; Regular expressions
+                        #:cl-base64 ; Base64url decode for JWT payloads
+                        #:babel ; UTF-8 octet<->string for JWT payloads
                         #:bordeaux-threads ; Thread synchronization
                         #:lparallel ; Parallel processing
                         #:ciao) ; OAuth 2.0 client
