@@ -20,6 +20,7 @@ needs their own credentials. See [[file:authentication.org][Authentication]] for
 
 *** Getting Started
 - [[file:quickstart.org][Quickstart Guide]] - Installation and first API calls
+- [[file:../examples/][Runnable Examples]] - Practical code for common use cases
 - [[file:authentication.org][Authentication]] - OAuth 2.0 and EVE SSO setup (*register your app first!*)
 
 *** Core Documentation

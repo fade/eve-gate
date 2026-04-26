@@ -58,9 +58,9 @@ NIL means .generation-signatures in the generated code directory.")
 ;;; ---------------------------------------------------------------------------
 
 (defun generate-api-functions (spec &key (output-dir nil)
-                                         (incremental t)
-                                         (compile-p nil)
-                                         (verbose t))
+                                      (incremental t)
+                                      (compile-p nil)
+                                      (verbose t))
   "Generate all ESI API functions from a processed specification.
 
 This is the primary entry point for the code generation framework.
@@ -140,7 +140,7 @@ Example:
     report))
 
 (defun generate-category-api (spec category &key (output-dir nil)
-                                                   (compile-p nil))
+                                              (compile-p nil))
   "Generate the API function file for a single ESI category.
 
 SPEC: An esi-spec struct
@@ -247,7 +247,7 @@ CATEGORY: Category string (e.g., \"characters\")
 
 Returns a list of operation ID strings."
              (loop for op-id being the hash-keys of *endpoint-registry*
-                   using (hash-value meta)
+                     using (hash-value meta)
                    when (string-equal (getf meta :category) category)
                      collect op-id))
           forms)
@@ -260,7 +260,7 @@ ENDPOINT: An endpoint-definition struct
 
 Returns a SETF form."
   `(setf (gethash ,(endpoint-definition-operation-id endpoint)
-                   *endpoint-registry*)
+                  *endpoint-registry*)
          (list :path ,(endpoint-definition-path endpoint)
                :method ,(endpoint-definition-method endpoint)
                :category ,(endpoint-definition-category endpoint)
