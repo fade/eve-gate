@@ -317,9 +317,15 @@ parameter names, with underscores converted to hyphens.
 
 #+begin_src lisp
 ;; Basic API client
-(eve-gate.api:make-api-client &key base-url user-agent 
-                                   connect-timeout read-timeout 
-                                   max-retries token-manager token)
+(eve-gate.api:make-api-client &key base-url user-agent
+                                   connect-timeout read-timeout
+                                   max-retries http-client
+                                   token-manager token)
+;; :http-client - optional pre-built http-client struct.  When supplied,
+;;                the timeout / retry / user-agent keywords are ignored;
+;;                caller is responsible for the http-client's config.
+;;                When nil (default), an http-client is built from the
+;;                timeout / retry / user-agent keywords.
 
 ;; High-level client (includes caching, etc.)
 (eve-gate:make-eve-client &key config client-id client-secret redirect-uri
