@@ -46,6 +46,7 @@ Slots:
                               (connect-timeout 10)
                               (read-timeout *default-timeout*)
                               (max-retries *default-retries*)
+                              http-client
                               token-manager
                               token)
   "Create a new API client for ESI access.
@@ -55,6 +56,10 @@ USER-AGENT: User-Agent header value
 CONNECT-TIMEOUT: TCP connection timeout in seconds
 READ-TIMEOUT: Response read timeout in seconds
 MAX-RETRIES: Maximum retry attempts for transient failures
+HTTP-CLIENT: Pre-built http-client struct.  When supplied, the timeout,
+  retry, and user-agent keywords are ignored — caller is responsible
+  for having configured the http-client.  When nil (default), an
+  http-client is built from the timeout / retry / user-agent keywords.
 TOKEN-MANAGER: Optional token-manager for authenticated endpoints
 TOKEN: Optional pre-set OAuth token string
 
@@ -68,12 +73,17 @@ Example:
   (make-api-client :token \"your-access-token\")
 
   ;; Authenticated client with token manager
-  (make-api-client :token-manager (make-token-manager ...))"
-  (let ((http-client (make-http-client :base-url base-url
-                                        :user-agent user-agent
-                                        :connect-timeout connect-timeout
-                                        :read-timeout read-timeout
-                                        :max-retries max-retries)))
+  (make-api-client :token-manager (make-token-manager ...))
+
+  ;; Reuse an externally-built http-client (e.g. one with custom
+  ;; middleware attached by make-eve-client)
+  (make-api-client :http-client my-http-client)"
+  (let ((http-client (or http-client
+                         (make-http-client :base-url base-url
+                                            :user-agent user-agent
+                                            :connect-timeout connect-timeout
+                                            :read-timeout read-timeout
+                                            :max-retries max-retries))))
     (%make-api-client :http-client http-client
                       :token-manager token-manager
                       :default-token token)))
