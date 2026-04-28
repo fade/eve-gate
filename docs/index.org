@@ -66,29 +66,29 @@ git clone https://github.com/fade/eve-gate.git
 
 ** Feature Overview
 
-| Feature                  | Description                                    |
-|--------------------------+------------------------------------------------|
-| 195 API Functions        | Complete ESI endpoint coverage                 |
-| OAuth 2.0                | Full EVE SSO authentication flow               |
-| Multi-tier Caching       | Memory + file with ETag revalidation           |
-| Rate Limiting            | Token bucket algorithm, per-endpoint limits    |
-| Parallel Execution       | Bulk operations with concurrency control       |
-| Type System              | EVE entity ID validation                       |
-| Structured Logging       | JSON/text formatters with correlation IDs      |
-| Health Monitoring        | System health checks and SLA tracking          |
+| Feature            | Description                                 |
+|--------------------+---------------------------------------------|
+| 195 API Functions  | Complete ESI endpoint coverage              |
+| OAuth 2.0          | Full EVE SSO authentication flow            |
+| Multi-tier Caching | Memory + file with ETag revalidation        |
+| Rate Limiting      | Token bucket algorithm, per-endpoint limits |
+| Parallel Execution | Bulk operations with concurrency control    |
+| Type System        | EVE entity ID validation                    |
+| Structured Logging | JSON/text formatters with correlation IDs   |
+| Health Monitoring  | System health checks and SLA tracking       |
 
 ** Package Overview
 
-| Package               | Purpose                              |
-|-----------------------+--------------------------------------|
-| =eve-gate=              | Main client interface                |
-| =eve-gate.api=          | 195 generated API functions          |
-| =eve-gate.auth=         | OAuth 2.0 authentication             |
-| =eve-gate.cache=        | Caching subsystem                    |
-| =eve-gate.core=         | HTTP client and conditions           |
-| =eve-gate.types=        | EVE entity types                     |
-| =eve-gate.concurrent=   | Rate limiting and parallel ops       |
-| =eve-gate.utils=        | Logging, config, monitoring          |
+| Package             | Purpose                        |
+|---------------------+--------------------------------|
+| =eve-gate=            | Main client interface          |
+| =eve-gate.api=        | 195 generated API functions    |
+| =eve-gate.auth=       | OAuth 2.0 authentication       |
+| =eve-gate.cache=      | Caching subsystem              |
+| =eve-gate.core=       | HTTP client and conditions     |
+| =eve-gate.types=      | EVE entity types               |
+| =eve-gate.concurrent= | Rate limiting and parallel ops |
+| =eve-gate.utils=      | Logging, config, monitoring    |
 
 ** License
 
