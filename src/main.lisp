@@ -50,7 +50,6 @@ ENABLE-PERFORMANCE-MONITORING: Initialize performance subsystem (default: T)
                          :redirect-uri redirect-uri)))
          (api-client (eve-gate.api:make-api-client
                        :http-client http-client
-                       :cache-manager cache-manager
                        :base-url eve-gate.core:*esi-base-url*)))
     (make-instance 'eve-client
                    :http-client http-client
