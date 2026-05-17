@@ -2252,6 +2252,14 @@
    #:submit-refresh-batch
    #:submit-bootstrap
 
+   ;; Cancellation verbs
+   #:cancel-refresh
+   #:cancel-bootstrap
+
+   ;; Observability
+   #:scheduler-state
+   #:reset-scheduler-stats
+
    ;; Bootstrap handle
    #:bootstrap-handle
    #:bootstrap-handle-id
@@ -2325,6 +2333,7 @@
    #:esi-budget-exhausted-in-flight
    #:esi-deadline-missed
    #:esi-deadline-missed-time-in-queue
+   #:esi-cancelled
    #:esi-failure
    #:esi-failure-attempt-count
    #:esi-http-error

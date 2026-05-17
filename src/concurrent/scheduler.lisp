@@ -250,6 +250,19 @@ cause — the queue was just slow. Currently delivered for engine-queue
 expirations; held-queue expirations are reported as `esi-budget-exhausted`
 because the only reason an item is held is that the budget gate was closed."))
 
+(define-condition esi-cancelled (esi-skip)
+  ()
+  (:report
+   (lambda (c stream)
+     (format stream "ESI submission cancelled for ~A (~A)"
+             (esi-completion-event-endpoint c)
+             (esi-completion-event-operation-id c))))
+  (:documentation "Skip event: the refresh was cancelled by the consumer
+before dispatch. Delivered through `cancel-refresh` and `cancel-bootstrap`
+for handles whose status was still `:pending`. Dispatched handles are not
+cancelled and their original completion still fires per Q5 of the
+coordinator review."))
+
 (define-condition esi-rate-limit-exhausted (esi-failure)
   ((consecutive-420s :initarg :consecutive-420s :initform 0
                      :reader esi-rate-limit-exhausted-consecutive-420s)
@@ -1087,9 +1100,14 @@ errors)."
              (t nil))))
     (append base extras)))
 
-(defun deliver-completion (scheduler handle completion)
+(defun deliver-completion (scheduler handle completion &key (target-status :completed))
   "Attach COMPLETION to HANDLE, transition its status, fire the appropriate
 callback, update statistics, and remove the handle from the active set.
+
+TARGET-STATUS defaults to `:completed` for natural completions. `cancel-refresh`
+passes `:cancelled` so that consumer code reading REFRESH-HANDLE-STATUS can
+distinguish a naturally-settled handle from one that was cancelled before
+dispatch.
 
 Safe to call exactly once per handle; further calls are silently ignored."
   (let (callback)
@@ -1097,7 +1115,7 @@ Safe to call exactly once per handle; further calls are silently ignored."
       (when (member (refresh-handle-status handle) '(:completed :cancelled))
         (return-from deliver-completion))
       (setf (slot-value handle 'completion) completion
-            (slot-value handle 'status) :completed)
+            (slot-value handle 'status) target-status)
       (setf callback
             (case (refresh-completion-outcome completion)
               ((:ok :cache-hit) (refresh-handle-on-complete handle))
@@ -1603,3 +1621,257 @@ BOOTSTRAP-HANDLE-COMPLETED-COUNT, BOOTSTRAP-HANDLE-OK-COUNT, etc."
     (setf (bootstrap-handle-refresh-handles b-handle)
           (nreverse (bootstrap-handle-refresh-handles b-handle)))
     b-handle))
+
+(defun build-cancelled-completion (scheduler handle)
+  "Construct a `:skipped` refresh-completion carrying an `esi-cancelled` event.
+Called by cancel-refresh when a still-pending handle is cancelled."
+  (let* ((now (get-universal-time))
+         (enqueued-at (refresh-handle-enqueued-at handle))
+         (wait-time (max 0.0 (float (- now enqueued-at))))
+         (deadline-remaining
+           (max 0 (- (refresh-handle-deadline-at handle) now)))
+         (event (make-condition
+                 'esi-cancelled
+                 :scheduler scheduler
+                 :handle handle
+                 :operation-id (refresh-handle-operation-id handle)
+                 :endpoint (refresh-handle-endpoint handle)
+                 :batch-id (refresh-handle-batch-id handle)
+                 :enqueued-at enqueued-at
+                 :completed-at now
+                 :wait-time wait-time
+                 :deadline-remaining-at-skip deadline-remaining)))
+    (%make-refresh-completion
+     :outcome :skipped
+     :event event
+     :enqueued-at enqueued-at
+     :completed-at now
+     :wait-time wait-time
+     :endpoint (refresh-handle-endpoint handle)
+     :operation-id (refresh-handle-operation-id handle)
+     :batch-id (refresh-handle-batch-id handle))))
+
+(defun cancel-refresh (scheduler handle)
+  "Cancel HANDLE.
+
+If HANDLE is still `:pending` in the held-queue, transitions it to
+`:cancelled`, builds a `:skipped` completion carrying an `esi-cancelled`
+event, fires the consumer's on-skip callback, and removes the handle from
+the scheduler's active set. The dispatcher's held-queue entry for the
+handle is dropped silently on its next sweep. Returns T.
+
+If HANDLE has already been `:dispatched`, the call is a no-op: per Q5 of
+the coordinator review, dispatched callbacks still fire with their
+eventual response (success or failure). Returns NIL.
+
+If HANDLE is already in a terminal status (`:completed` or `:cancelled`),
+the call is a no-op. Returns NIL."
+  (let ((completion (build-cancelled-completion scheduler handle))
+        (delivered-p nil))
+    (bt:with-lock-held ((refresh-handle-lock handle))
+      (when (eq (refresh-handle-status handle) :pending)
+        (setf delivered-p t)))
+    (when delivered-p
+      (deliver-completion scheduler handle completion
+                          :target-status :cancelled)
+      t)))
+
+(defun cancel-bootstrap (scheduler bootstrap-handle)
+  "Cancel BOOTSTRAP-HANDLE.
+
+Marks the bootstrap-handle's cancelled-p flag, then walks each refresh-handle
+in the batch and calls CANCEL-REFRESH. Dispatched refresh-handles complete
+naturally per Q5. Returns the number of refresh-handles that were actually
+cancelled — i.e., the number for which CANCEL-REFRESH returned T.
+
+The bootstrap-handle's entry in the scheduler's bootstrap-batches index is
+removed once the bookkeeping completes; this prevents stale entries in the
+:bootstrap block of SCHEDULER-STATE. Per-spec wrapped callbacks continue to
+fire as cancellations and in-flight completions land, so the batch's own
+on-complete fires when every spec has settled."
+  (bt:with-lock-held ((bootstrap-handle-lock bootstrap-handle))
+    (setf (bootstrap-handle-cancelled-p bootstrap-handle) t))
+  (let ((cancelled-count 0))
+    (dolist (handle (bootstrap-handle-refresh-handles bootstrap-handle))
+      (when (cancel-refresh scheduler handle)
+        (incf cancelled-count)))
+    (bt:with-lock-held ((request-scheduler-bootstrap-batches-lock scheduler))
+      (remhash (bootstrap-handle-id bootstrap-handle)
+               (request-scheduler-bootstrap-batches scheduler)))
+    cancelled-count))
+
+(defun scheduler-budget-state (scheduler)
+  "Build the `:budget` block of SCHEDULER-STATE."
+  (let* ((limiter (request-scheduler-rate-limiter scheduler))
+         (stats (rate-limiter-statistics limiter))
+         (now (get-universal-time))
+         (reset-at (esi-rate-limiter-error-limit-reset limiter)))
+    (list :limit-remain (getf stats :error-limit-remain)
+          :limit-reset-seconds (max 0 (- reset-at now))
+          :backoff-remaining (getf stats :backoff-remaining)
+          :consecutive-420s (getf stats :consecutive-420s)
+          :in-flight (scheduler-in-flight-count scheduler)
+          :predicted-remain (predicted-remain-of scheduler))))
+
+(defun scheduler-queue-state (scheduler)
+  "Build the `:queue` block of SCHEDULER-STATE from the engine's queue stats."
+  (let* ((engine (request-scheduler-engine scheduler))
+         (queue (concurrent-engine-request-queue engine))
+         (stats (queue-statistics queue)))
+    (list :current-depth (getf stats :current-depth)
+          :depths-by-priority (getf stats :depths-by-priority)
+          :total-enqueued (getf stats :total-enqueued)
+          :total-dequeued (getf stats :total-dequeued)
+          :total-expired (getf stats :total-expired)
+          :total-rejected (getf stats :total-rejected)
+          :avg-wait-time (getf stats :avg-wait-time))))
+
+(defun scheduler-bootstrap-state (scheduler)
+  "Build the `:bootstrap` block of SCHEDULER-STATE.
+
+Returns a plist describing one active bootstrap batch, or NIL when no
+bootstrap batches are registered. Multiple concurrent bootstrap batches
+are not currently expected; if more than one is active, an arbitrary
+one is reported."
+  (let ((batch nil))
+    (bt:with-lock-held ((request-scheduler-bootstrap-batches-lock scheduler))
+      (maphash (lambda (k v)
+                 (declare (ignore k))
+                 (setf batch v))
+               (request-scheduler-bootstrap-batches scheduler)))
+    (when batch
+      (bt:with-lock-held ((bootstrap-handle-lock batch))
+        (let* ((total (bootstrap-handle-total batch))
+               (completed (bootstrap-handle-completed-count batch))
+               (ok (bootstrap-handle-ok-count batch))
+               (failed (bootstrap-handle-failed-count batch))
+               (cancelled-p (bootstrap-handle-cancelled-p batch)))
+          (list :active-p (and (not cancelled-p) (< completed total))
+                :batch-id (bootstrap-handle-batch-id batch)
+                :pending (- total completed)
+                :completed ok
+                :failed failed
+                :paced-rate (request-scheduler-bootstrap-pacing scheduler)))))))
+
+(defun scheduler-engine-state (scheduler)
+  "Build the `:engine` block of SCHEDULER-STATE from engine-metrics."
+  (let* ((engine (request-scheduler-engine scheduler))
+         (m (engine-metrics engine)))
+    (list :total-requests (getf m :total-requests)
+          :success-rate (getf m :success-rate)
+          :avg-latency (getf m :avg-latency)
+          :throughput (getf m :throughput)
+          :worker-count (getf m :worker-count))))
+
+(defun scheduler-cache-state (scheduler)
+  "Build the `:cache` block of SCHEDULER-STATE.
+
+Returns NIL when the scheduler has no cache-manager attached."
+  (let ((manager (request-scheduler-cache-manager scheduler)))
+    (when manager
+      (let* ((stats (cache-statistics manager))
+             (global (getf stats :global))
+             (memory (getf stats :memory)))
+        (list :hit-rate (cache-hit-rate manager)
+              :l1-hits (getf global :l1-hits)
+              :l2-hits (getf global :l2-hits)
+              :etag-hits (getf global :etag-hits)
+              :full-fetches (getf global :full-fetches)
+              :invalidations (getf global :invalidations)
+              :memory-entries (getf memory :count)
+              :memory-max (getf memory :max-entries))))))
+
+(defun scheduler-internal-state (scheduler)
+  "Build the `:scheduler` block of SCHEDULER-STATE from the scheduler's own
+counters. Returns a snapshot under the scheduler's stats lock; the snapshot
+is consistent across the included counters."
+  (bt:with-lock-held ((request-scheduler-stats-lock scheduler))
+    (list :total-submitted (request-scheduler-total-submitted scheduler)
+          :total-cache-hits (request-scheduler-total-cache-hits scheduler)
+          :total-dispatched (request-scheduler-total-dispatched scheduler)
+          :total-skipped (request-scheduler-total-skipped scheduler)
+          :total-failed (request-scheduler-total-failed scheduler)
+          :skip-reasons (copy-list (request-scheduler-skip-reasons scheduler)))))
+
+(defun scheduler-recent-failures (scheduler &key (limit 20))
+  "Return the most-recent failure-ring entries, newest-first, capped at LIMIT.
+
+Each entry is a plist produced by FAILURE-RING-ENTRY: it carries `:at`,
+`:endpoint`, `:operation-id`, `:priority`, `:batch-id`, `:attempt`,
+`:event-class`, plus class-specific extras (`:event-status` for HTTP errors,
+`:event-cause` for network failures, `:event-consecutive-420s` for rate-limit
+exhaustion)."
+  (bt:with-lock-held ((request-scheduler-stats-lock scheduler))
+    (let* ((ring (request-scheduler-failure-ring scheduler))
+           (size (request-scheduler-failure-ring-size scheduler))
+           (idx (request-scheduler-failure-ring-index scheduler)))
+      (loop for i below size
+            for j = (mod (- idx 1 i) size)
+            for entry = (aref ring j)
+            for collected from 0
+            while entry
+            while (< collected limit)
+            collect entry))))
+
+(defun scheduler-state (scheduler &key (recent-failures-limit 20))
+  "Return a multi-block plist snapshot of SCHEDULER's current state.
+
+The plist has these top-level keys, each holding a sub-plist:
+
+  :BUDGET            ESI error-budget view — :limit-remain, :limit-reset-seconds,
+                     :backoff-remaining, :consecutive-420s, :in-flight,
+                     :predicted-remain. Predicted-remain is the scheduler's
+                     budget projection after subtracting in-flight and the
+                     jitter margin; the gate closes when it drops below
+                     budget-threshold.
+  :QUEUE             Engine queue depth, lifetime counters, average wait time.
+  :BOOTSTRAP         Active bootstrap batch progress, or NIL when no bootstrap
+                     is registered. When multiple concurrent bootstraps run,
+                     an arbitrary one is reported — concurrent bootstrap
+                     batches are not currently expected.
+  :ENGINE            Engine performance metrics (total requests, success rate,
+                     average latency, throughput, worker count).
+  :CACHE             Cache hit-rate and per-tier counters, or NIL when no
+                     cache-manager is attached.
+  :SCHEDULER         Scheduler-private counters and skip-reason histogram.
+  :RECENT-FAILURES   Most-recent failure-ring entries, newest-first, capped
+                     at RECENT-FAILURES-LIMIT (default 20).
+
+Aggregation is lock-free at the top level — each sub-plist acquires the
+locks of the subsystem it reads from, in isolation. The snapshot is not a
+single atomic view across subsystems; counters read at different points may
+lag by a poll interval. Safe to call at sustained 1Hz from a harness."
+  (list :budget (scheduler-budget-state scheduler)
+        :queue (scheduler-queue-state scheduler)
+        :bootstrap (scheduler-bootstrap-state scheduler)
+        :engine (scheduler-engine-state scheduler)
+        :cache (scheduler-cache-state scheduler)
+        :scheduler (scheduler-internal-state scheduler)
+        :recent-failures (scheduler-recent-failures
+                          scheduler :limit recent-failures-limit)))
+
+(defun reset-scheduler-stats (scheduler)
+  "Zero the scheduler's cumulative counters: total-submitted, total-cache-hits,
+total-dispatched, total-skipped, total-failed, skip-reasons, and the
+failure ring.
+
+In-flight count, active handles, and the bootstrap-batches index are left
+untouched — they describe live state, not cumulative history.
+
+Subsystem counters (rate-limiter statistics, queue statistics, engine
+metrics, cache statistics) are not reset here; reset each subsystem's stats
+directly (e.g., RESET-RATE-LIMITER-STATS, RESET-ENGINE-METRICS) when
+those views also need to be zeroed."
+  (bt:with-lock-held ((request-scheduler-stats-lock scheduler))
+    (setf (request-scheduler-total-submitted scheduler) 0
+          (request-scheduler-total-cache-hits scheduler) 0
+          (request-scheduler-total-dispatched scheduler) 0
+          (request-scheduler-total-skipped scheduler) 0
+          (request-scheduler-total-failed scheduler) 0
+          (request-scheduler-skip-reasons scheduler) nil
+          (request-scheduler-failure-ring-index scheduler) 0)
+    (let ((ring (request-scheduler-failure-ring scheduler))
+          (size (request-scheduler-failure-ring-size scheduler)))
+      (dotimes (i size)
+        (setf (aref ring i) nil))))
+  scheduler)
