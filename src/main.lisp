@@ -20,6 +20,11 @@
                               (enable-performance-monitoring t))
   "Create a new EVE client instance with optional configuration.
 
+The returned `eve-client` carries a production-wired HTTP client built via
+`eve-gate.concurrent:make-eve-http-client`. The client respects the global
+ESI rate limit, recovers from 420 Error Limited responses, honors
+Cache-Control headers when caching is enabled, and reuses HTTP connections.
+
 ENABLE-PERFORMANCE-MONITORING: Initialize performance subsystem (default: T)
   When enabled, initializes string interning, memory pools, performance
   metrics, and connection pool optimization."
@@ -30,19 +35,15 @@ ENABLE-PERFORMANCE-MONITORING: Initialize performance subsystem (default: T)
      :max-connections (or (get-config-value :connection-pool-size config) 20)
      :enable-compression t))
   (let* ((final-config (merge-config config client-id client-secret redirect-uri))
-         ;; Build middleware stack with connection pool optimization
-         (base-middleware (eve-gate.core:make-default-middleware-stack))
-         (full-middleware (if enable-performance-monitoring
-                              (eve-gate.core:add-middleware
-                               base-middleware
-                               (eve-gate.core:make-connection-pool-middleware))
-                              base-middleware))
-         (http-client (eve-gate.core:make-http-client 
-                       :timeout (or (get-config-value :default-timeout final-config) 30)
-                       :retries (or (get-config-value :default-retries final-config) 3)
-                       :middleware full-middleware))
-         (cache-manager (when (get-config-value :cache-enabled final-config)
-                          (eve-gate.cache:make-cache-manager)))
+         (cache-manager
+           (when (get-config-value :cache-enabled final-config)
+             (eve-gate.cache:make-cache-manager
+              :memory-cache-size (or (get-config-value :memory-cache-size final-config)
+                                     10000))))
+         (http-client (eve-gate.concurrent:make-eve-http-client
+                       :read-timeout (or (get-config-value :default-timeout final-config) 30)
+                       :max-retries (or (get-config-value :default-retries final-config) 3)
+                       :cache-manager cache-manager))
          (auth-client (when (and client-id client-secret)
                         (eve-gate.auth:make-oauth-client
                          :client-id client-id
