@@ -292,10 +292,15 @@ Example:
                                         . ,(concatenate 'string "Bearer " bearer-token))))
                                    (when if-none-match
                                      `(("If-None-Match" . ,if-none-match))))))
-         ;; Build the request context for middleware
+         ;; Build the request context for middleware. :query-params
+         ;; must travel with the context so the cache middleware can
+         ;; partition cache keys by query string — otherwise every
+         ;; paginated request on a given path collides on one entry
+         ;; and pages 2..N return the page-1 body.
          (request-context (list :method method
                                 :uri uri
                                 :path path
+                                :query-params query-params
                                 :headers request-headers
                                 :content content
                                 :client client)))
