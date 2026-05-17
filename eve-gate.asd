@@ -151,7 +151,8 @@
                          (:file "bulk-operations" :depends-on ("engine" "parallel-executor"))
                          (:file "parallel-client" :depends-on ("engine" "parallel-executor"
                                                                         "bulk-operations"))
-                         (:file "job-queue" :depends-on ("engine"))))
+                         (:file "job-queue" :depends-on ("engine"))
+                         (:file "scheduler" :depends-on ("engine" "eve-http-client"))))
 
                ;; Main interface
                (:file "main"
