@@ -2250,6 +2250,19 @@
    ;; Submission verbs
    #:submit-refresh
    #:submit-refresh-batch
+   #:submit-bootstrap
+
+   ;; Bootstrap handle
+   #:bootstrap-handle
+   #:bootstrap-handle-id
+   #:bootstrap-handle-batch-id
+   #:bootstrap-handle-total
+   #:bootstrap-handle-completed-count
+   #:bootstrap-handle-ok-count
+   #:bootstrap-handle-failed-count
+   #:bootstrap-handle-skipped-count
+   #:bootstrap-handle-cancelled-p
+   #:bootstrap-handle-refresh-handles
 
    ;; Handle introspection
    #:refresh-handle
