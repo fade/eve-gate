@@ -336,7 +336,7 @@ parameter names, with underscores converted to hyphens.
 
 #+begin_src lisp
 ;; Call by operation ID
-(eve-gate.api:api-call client "get_characters_character_id" 
+(eve-gate.api:api-call client "get_characters_character_id"
                        :character-id 95465499)
 
 ;; HTTP verb methods
@@ -364,6 +364,138 @@ parameter names, with underscores converted to hyphens.
 ;; List all endpoints
 (eve-gate.api:list-all-endpoints)
 #+end_src
+
+** Request Scheduler
+
+The high-level submission surface (see [[file:concurrency.org#request-scheduler][Concurrency — Request Scheduler]]
+for an architectural overview). All symbols are in =eve-gate.concurrent=.
+
+*** Construction and lifecycle
+
+#+begin_src lisp
+(make-request-scheduler &key cache-manager rate-limiter http-client engine
+                             (budget-threshold 30) (budget-resume 50)
+                             (jitter-margin 5)
+                             (max-queue-depth 5000) (worker-count 8)
+                             (rate-limit-timeout 30.0)
+                             (bootstrap-queue-depth 80000)
+                             (bootstrap-pacing 5.0)
+                             (failure-ring-size 256)
+                             (dispatcher-poll-interval 0.25))
+;; Returns a request-scheduler. The rate-limiter, http-client, and engine
+;; are built automatically when not supplied. Pass a cache-manager to
+;; enable the cache short-circuit.
+
+(start-scheduler scheduler)         ; idempotent; starts engine + dispatcher
+(stop-scheduler  scheduler &key (wait t))  ; idempotent; joins dispatcher
+(with-scheduler  (var &rest args) &body body)  ; unwind-safe start/stop
+#+end_src
+
+*** Submission verbs
+
+#+begin_src lisp
+;; Single refresh — priority is required.
+(submit-refresh scheduler &key operation-id params priority deadline-seconds
+                               batch-id on-complete on-skip on-fail)
+;; Returns a refresh-handle.
+
+;; Multi-spec batch — wraps each spec's callbacks for progress tracking.
+(submit-refresh-batch scheduler specs
+                      &key batch-id on-progress on-batch-complete)
+;; SPECS is a list of plists, each accepted by submit-refresh's keyword
+;; args (per-spec :batch-id is overridden by the outer :batch-id).
+;; Returns a list of refresh-handles, in spec order.
+
+;; Bulk drain — paced by the scheduler's bootstrap-pacing token bucket.
+(submit-bootstrap scheduler specs
+                  &key batch-id deadline-seconds on-progress on-complete)
+;; SPECS is a list of plists with :operation-id, :params, :on-complete,
+;; :on-skip, :on-fail (no :priority — bootstrap is implicit).
+;; Returns a bootstrap-handle. Signals scheduler-queue-full if the batch
+;; would push slot 4 past bootstrap-queue-depth.
+#+end_src
+
+Priority must be one of =:critical=, =:hot=, =:warm=, =:cold= on
+=submit-refresh=. =:bootstrap= is rejected by =submit-refresh= and routed
+through =submit-bootstrap= instead.
+
+*** Cancellation
+
+#+begin_src lisp
+(cancel-refresh   scheduler handle)             ; T if cancelled, NIL if no-op
+(cancel-bootstrap scheduler bootstrap-handle)   ; integer count cancelled
+#+end_src
+
+Only =:pending= handles are cancellable. Dispatched handles complete with
+their eventual response and the consumer's normal callback fires.
+
+*** Observation
+
+#+begin_src lisp
+(scheduler-state scheduler &key (recent-failures-limit 20))
+;; Returns a plist with keys :budget :queue :bootstrap :engine :cache
+;; :scheduler :recent-failures. Sub-blocks are NIL when the corresponding
+;; subsystem is absent (no cache-manager, no active bootstrap, etc.).
+;; Safe to call at sustained 1Hz.
+
+(reset-scheduler-stats scheduler)
+;; Zeros cumulative scheduler-private counters. Does not touch in-flight,
+;; active handles, or active bootstrap batches.
+#+end_src
+
+*** =refresh-handle= accessors
+
+| Accessor                       | Description                                  |
+|--------------------------------+----------------------------------------------|
+| =refresh-handle-id=            | gensym for logging                           |
+| =refresh-handle-status=        | =:pending=, =:dispatched=, =:completed=, =:cancelled= |
+| =refresh-handle-completion=    | the =refresh-completion= when settled        |
+| =refresh-handle-operation-id=  | normalized operation-id string               |
+| =refresh-handle-endpoint=      | resolved path with substitutions             |
+| =refresh-handle-priority=      | consumer-facing keyword priority             |
+| =refresh-handle-batch-id=      | pass-through batch-id, if any                |
+
+Status and completion reads are atomic at the word level on SBCL — no
+lock needed for snapshot reads.
+
+*** =refresh-completion= accessors
+
+| Accessor                                | Description                              |
+|-----------------------------------------+------------------------------------------|
+| =refresh-completion-outcome=            | =:ok=, =:cache-hit=, =:skipped=, =:failed= |
+| =refresh-completion-event=              | =esi-completion-event= instance or NIL   |
+| =refresh-completion-data=               | parsed response body (=:ok=, =:cache-hit=) |
+| =refresh-completion-response=           | =esi-response= struct (=:ok= only)       |
+| =refresh-completion-etag=               | ETag from response or cache              |
+| =refresh-completion-cache-tier=         | =:l1=, =:l2=, or NIL                     |
+| =refresh-completion-attempt-count=      | 1, or higher if 420-retried              |
+| =refresh-completion-enqueued-at=        | universal-time at =submit-refresh=       |
+| =refresh-completion-dispatched-at=      | universal-time at engine pickup, or NIL  |
+| =refresh-completion-completed-at=       | universal-time at outcome                |
+| =refresh-completion-wait-time=          | seconds in queue                         |
+| =refresh-completion-rate-limit-wait=    | seconds in the token gate                |
+| =refresh-completion-http-latency=       | seconds in HTTP I/O, or NIL              |
+| =refresh-completion-endpoint=           | resolved endpoint                        |
+| =refresh-completion-operation-id=       | normalized operation-id                  |
+| =refresh-completion-batch-id=           | pass-through batch-id, if any            |
+
+*** =bootstrap-handle= accessors
+
+| Accessor                              | Description                              |
+|---------------------------------------+------------------------------------------|
+| =bootstrap-handle-id=                 | gensym for logging                       |
+| =bootstrap-handle-batch-id=           | grouping string                          |
+| =bootstrap-handle-total=              | spec count at submit time                |
+| =bootstrap-handle-completed-count=    | settled count (any terminal outcome)     |
+| =bootstrap-handle-ok-count=           | succeeded count (=:ok= + =:cache-hit=)   |
+| =bootstrap-handle-failed-count=       | failed count                             |
+| =bootstrap-handle-skipped-count=      | skipped count                            |
+| =bootstrap-handle-cancelled-p=        | flag set by =cancel-bootstrap=           |
+| =bootstrap-handle-refresh-handles=    | the per-spec refresh-handles, in order   |
+
+Reads on the counters require the bootstrap-handle's lock for a coherent
+snapshot — the wrapped per-spec callbacks bump under the same lock. The
+counters are also exposed through =scheduler-state= for active batches.
 
 ** Response Handling
 

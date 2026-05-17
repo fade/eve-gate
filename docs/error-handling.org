@@ -9,7 +9,28 @@ a rich hierarchy of conditions for different error types.
 
 [[file:index.org][Back to Index]] | [[file:api-reference.org][API Reference]]
 
-** Condition Hierarchy
+** Condition Families at a Glance
+
+Eve-gate exposes three distinct condition families, each tied to a
+different lifecycle position:
+
+| Family               | Package              | Lifecycle           | Raises as |
+|----------------------+----------------------+---------------------+-----------|
+| =esi-*= (wire-side)  | =eve-gate.core=      | Synchronous, raised | =error=   |
+|                      |                      | from the HTTP path  |           |
+| =scheduler-*=        | =eve-gate.concurrent= | Synchronous, raised | =error=   |
+| (programmer error)   |                      | from =submit-refresh= |         |
+|                      |                      | and =submit-bootstrap= |        |
+| =esi-completion-event= | =eve-gate.concurrent= | Asynchronous,       | plain =condition= |
+| (scheduler outcome)  |                      | delivered through   | — *not* an =error= |
+|                      |                      | refresh callbacks   | subtype          |
+
+The wire-side =esi-error= family is what =eve-gate.api:*= functions raise
+when ESI returns a non-2xx response or the network fails. The scheduler
+families are produced by the higher-level request-scheduler — see
+[[file:concurrency.org#request-scheduler][Request Scheduler]] for context.
+
+** Wire-side Hierarchy (=eve-gate.core=)
 
 #+begin_example
 esi-condition (base)
@@ -30,6 +51,133 @@ esi-condition (base)
         ├── esi-connection-timeout
         └── esi-read-timeout
 #+end_example
+
+** Scheduler Programmer-Error Hierarchy (=eve-gate.concurrent=)
+
+Raised synchronously by =submit-refresh= and =submit-bootstrap= when the
+caller hands the scheduler something it cannot accept. Inherits from
+=error=, catchable with =handler-case=.
+
+#+begin_example
+scheduler-error (error)
+├── scheduler-missing-priority    ; :priority omitted on submit-refresh
+├── scheduler-invalid-priority    ; :priority not in accepted set, incl. :bootstrap
+├── scheduler-not-running         ; scheduler stopped or never started
+├── scheduler-queue-full          ; queue would exceed its cap
+└── scheduler-unknown-endpoint    ; operation-id not in find-endpoint
+#+end_example
+
+#+begin_src lisp
+(handler-case
+    (eve-gate.concurrent:submit-refresh *scheduler*
+      :operation-id "get_markets_region_id_orders"
+      :params '(:region-id 10000002 :type-id 587)
+      ;; ... missing :priority intentionally
+      )
+  (eve-gate.concurrent:scheduler-missing-priority (c)
+    (format t "Caller bug: priority not set for ~A~%"
+            (eve-gate.concurrent:scheduler-error-operation-id c))))
+#+end_src
+
+These are programmer errors, not transient conditions — there is no
+retry path. Fix the call site.
+
+** Completion-Event Hierarchy (=eve-gate.concurrent=)
+
+Delivered asynchronously through =refresh-completion='s =event= slot for
+=:skipped= and =:failed= outcomes. The classes are plain conditions —
+*not* =error= subtypes — because they are protocol-bearing data, not
+unconditional faults. Consumer code that wants debugger landing escalates
+explicitly via =(error event)=.
+
+#+begin_example
+esi-completion-event                   ; abstract — base for all
+├── esi-skip                           ; abstract — no HTTP performed
+│   ├── esi-budget-exhausted           ; held past deadline, budget shallow
+│   ├── esi-deadline-missed            ; sat in engine queue past deadline
+│   ├── esi-cancelled                  ; cancel-refresh / cancel-bootstrap
+│   └── esi-queue-full                 ; submission expelled after acceptance
+└── esi-failure                        ; abstract — HTTP attempted, failed
+    ├── esi-http-error                 ; abstract — HTTP-level fault
+    │   ├── esi-http-4xx-error
+    │   └── esi-http-5xx-error
+    ├── esi-network-failure            ; timeout, DNS, connection refused
+    └── esi-rate-limit-exhausted       ; 420 retries exhausted
+#+end_example
+
+=esi-network-failure= is the scheduler-side class — the wire-side
+=eve-gate.core:esi-network-error= is intentionally a different class so
+that callers can distinguish "the network call failed while we were trying
+to dispatch it" (wire-side) from "the scheduler is reporting that a
+submission failed at the network layer" (scheduler-side). The scheduler
+translates between them at its boundary.
+
+*** Three ergonomic shapes for consumer code
+
+**** A. Keyword switch on outcome (simplest)
+
+#+begin_src lisp
+(lambda (completion)
+  (case (eve-gate.concurrent:refresh-completion-outcome completion)
+    (:ok        (use-data (eve-gate.concurrent:refresh-completion-data completion)))
+    (:cache-hit (use-cached (eve-gate.concurrent:refresh-completion-data completion)))
+    (:skipped   (log-skip (eve-gate.concurrent:refresh-completion-event completion)))
+    (:failed    (log-fail (eve-gate.concurrent:refresh-completion-event completion)))))
+#+end_src
+
+**** B. =typecase= on event class (family dispatch)
+
+#+begin_src lisp
+(lambda (completion)
+  (typecase (eve-gate.concurrent:refresh-completion-event completion)
+    (eve-gate.concurrent:esi-http-4xx-error      (handle-4xx (refresh-completion-event completion)))
+    (eve-gate.concurrent:esi-http-5xx-error      (handle-5xx (refresh-completion-event completion)))
+    (eve-gate.concurrent:esi-network-failure     (handle-net (refresh-completion-event completion)))
+    (eve-gate.concurrent:esi-rate-limit-exhausted (handle-420 (refresh-completion-event completion)))
+    (eve-gate.concurrent:esi-budget-exhausted    (defer-to-next-cycle))
+    (eve-gate.concurrent:esi-deadline-missed     (log-late))
+    (eve-gate.concurrent:esi-cancelled           nil)))
+#+end_src
+
+**** C. Re-signal for =handler-bind= (most powerful)
+
+#+begin_src lisp
+;; A refresh-cycle driver installs handlers; per-spec callbacks signal
+;; the event so those handlers run with the right binding scope.
+(handler-bind ((eve-gate.concurrent:esi-http-5xx-error  #'retry-or-log)
+               (eve-gate.concurrent:esi-network-failure #'mark-stale-and-continue))
+  (eve-gate.concurrent:submit-refresh-batch *scheduler* specs
+    :on-batch-complete (lambda () (cycle-done))))
+
+;; The wrapped per-spec callback signals the event:
+(defun on-fail-handler (completion)
+  (signal (eve-gate.concurrent:refresh-completion-event completion)))
+#+end_src
+
+=signal= is the lightweight half of the protocol — the condition need
+not be raised as an error to be useful. =error= escalates to the
+debugger; =signal= just runs the handlers and continues.
+
+*** Common slot accessors
+
+All =esi-completion-event= subclasses carry:
+
+| Accessor                                       | Description                       |
+|------------------------------------------------+-----------------------------------|
+| =esi-completion-event-scheduler=               | the scheduler that produced it    |
+| =esi-completion-event-handle=                  | the refresh-handle (back-ref)     |
+| =esi-completion-event-operation-id=            | the operation-id that failed      |
+| =esi-completion-event-endpoint=                | the resolved endpoint string      |
+| =esi-completion-event-batch-id=                | pass-through batch-id if any      |
+| =esi-completion-event-enqueued-at=             | universal-time of submission      |
+| =esi-completion-event-completed-at=            | universal-time of outcome         |
+| =esi-completion-event-wait-time=               | seconds in scheduler before outcome |
+
+Subtype-specific slots add context — =esi-budget-exhausted= carries
+=:limit-remain= and =:predicted-remain=; =esi-http-error= carries
+=:status=, =:response-body=, =:response-headers=; =esi-network-failure=
+wraps the underlying condition in =:cause=. See the source for the full
+slot list.
 
 ** Basic Error Handling
 

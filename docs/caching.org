@@ -17,6 +17,10 @@ The caching system provides:
 - *ETag support*: Conditional requests using If-None-Match headers
 - *TTL management*: Automatic expiration based on ESI Cache-Control headers
 - *Cache policies*: Configurable per-endpoint caching behavior
+- *Submission-time short-circuit*: When the cache-manager is shared with
+  the [[file:concurrency.org#request-scheduler][request-scheduler]], fresh entries
+  deliver synchronously through =refresh-completion= with =outcome :cache-hit=,
+  bypassing the engine and consuming no rate-limit token.
 
 ** Basic Usage
 
@@ -138,6 +142,25 @@ conditional requests:
 ;; ESI returns 304, eve-gate returns cached body
 (eve-gate.api:get-characters-character-id *client* :character-id 95465499)
 #+end_src
+
+** Cache + Scheduler Coherence
+
+When the cache-manager is shared between =make-eve-client= and a
+=request-scheduler= built with the same =:cache-manager= argument,
+conditional-request handling is end-to-end coherent:
+
+1. *Cache short-circuit (synchronous, scheduler-side).* A fresh entry
+   delivers =:cache-hit= immediately from =submit-refresh= — no engine,
+   no token, no HTTP.
+2. *Stale entry with ETag (middleware-side).* The scheduler falls through
+   to the engine. The cache middleware on the request pipeline reads the
+   *same* cache, finds the stored ETag, and adds =If-None-Match=. If ESI
+   returns 304, the response middleware serves the cached body.
+
+The scheduler intentionally does *not* annotate =If-None-Match= itself —
+that responsibility lives on the middleware. Doing the annotation in
+both layers would put two competing =If-None-Match= headers on the wire
+and ESI would respond 400.
 
 ** Cache Keys
 

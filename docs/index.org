@@ -58,6 +58,27 @@ git clone https://github.com/fade/eve-gate.git
 (eve-gate.api:get-characters-character-id *client* :character-id 95465499)
 #+end_src
 
+=make-eve-client= now wires throttling + cache middleware into the
+production HTTP stack by default, so existing call sites get
+rate-limited, cache-coherent requests transparently.
+
+*** Scheduler Usage
+
+For callers that need budget-aware dispatch, paced bulk drains, or a
+single observation surface for monitoring, see the request-scheduler
+guide ([[file:concurrency.org#request-scheduler][Concurrency — Request Scheduler]]).
+
+#+begin_src lisp
+(eve-gate.concurrent:with-scheduler
+    (s :cache-manager (eve-gate.cache:make-cache-manager))
+  (eve-gate.concurrent:submit-refresh s
+    :operation-id "get_markets_region_id_orders"
+    :params '(:region-id 10000002 :type-id 587)
+    :priority :hot
+    :on-complete (lambda (c)
+                   (use-data (eve-gate.concurrent:refresh-completion-data c)))))
+#+end_src
+
 *** Running Tests
 
 #+begin_src lisp
@@ -66,16 +87,19 @@ git clone https://github.com/fade/eve-gate.git
 
 ** Feature Overview
 
-| Feature            | Description                                 |
-|--------------------+---------------------------------------------|
-| 195 API Functions  | Complete ESI endpoint coverage              |
-| OAuth 2.0          | Full EVE SSO authentication flow            |
-| Multi-tier Caching | Memory + file with ETag revalidation        |
-| Rate Limiting      | Token bucket algorithm, per-endpoint limits |
-| Parallel Execution | Bulk operations with concurrency control    |
-| Type System        | EVE entity ID validation                    |
-| Structured Logging | JSON/text formatters with correlation IDs   |
-| Health Monitoring  | System health checks and SLA tracking       |
+| Feature             | Description                                          |
+|---------------------+------------------------------------------------------|
+| 195 API Functions   | Complete ESI endpoint coverage                       |
+| OAuth 2.0           | Full EVE SSO authentication flow                     |
+| Multi-tier Caching  | Memory + file with ETag revalidation                 |
+| Rate Limiting       | Token bucket algorithm, per-endpoint limits          |
+| Request Scheduler   | Budget-aware, deadline-driven dispatch surface       |
+|                     | with cache short-circuit, predicted-budget gate,     |
+|                     | paced bulk-drain, unified observation                |
+| Parallel Execution  | Bulk operations with concurrency control             |
+| Type System         | EVE entity ID validation                             |
+| Structured Logging  | JSON/text formatters with correlation IDs            |
+| Health Monitoring   | System health checks and SLA tracking                |
 
 ** Package Overview
 

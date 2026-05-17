@@ -196,7 +196,293 @@ Eve-gate queues requests when rate limited:
     (eve-gate.api:get-characters-character-id *client* :character-id id)))
 #+end_src
 
-** Configuration Options
+** Request Scheduler
+
+The request-scheduler is the high-level submission surface above the engine,
+rate-limiter, and cache-manager. It coordinates three things that the lower
+primitives do not compose on their own: cache short-circuit at submission
+time, predicted-budget gating that pauses non-critical dispatch when ESI's
+error budget is shallow, and a paced bulk-drain channel for cold-start
+fetches that should not compete with the steady-state refresh cadence.
+
+Returns =refresh-handle= objects for individual submissions and
+=bootstrap-handle= objects for batches. Both carry the eventual outcome
+through typed callbacks, so consumer code never needs to poll.
+
+*** When to reach for the scheduler
+
+- *Heat-map refresh driver.* The consumer code is selecting endpoints from
+  a volatility heat-map and dispatching at a tiered cadence. The scheduler
+  accepts those submissions with =:priority :critical / :hot / :warm / :cold=,
+  short-circuits any whose cache entry is still fresh, and defers
+  non-critical work when the budget gate closes.
+- *Universe-mirror seed.* A one-shot drain of tens of thousands of
+  orderbook fetches needs to run at ESI's safe bulk rate (~5 req/sec) for
+  several hours without starving the steady-state heat-map. =submit-bootstrap=
+  routes those onto a paced channel with deadline-tolerant 6-hour expiry.
+- *Operator-facing dashboards.* The scheduler exposes a single =scheduler-state=
+  plist covering budget, queue, bootstrap, engine, cache, and recent
+  failures — designed to be polled at 1Hz by a monitoring harness.
+
+When the caller just needs one-off requests with caching and rate-limiting,
+=make-eve-client= already wires the production HTTP stack and the higher-level
+=eve-gate.api:*= verbs are enough. Reach for =request-scheduler= when the
+caller needs the gate, bulk channel, or unified observation.
+
+*** Lifecycle
+
+#+begin_src lisp
+;; Construct: cache-manager is optional but recommended.
+(defvar *scheduler*
+  (eve-gate.concurrent:make-request-scheduler
+   :cache-manager (eve-gate.cache:make-cache-manager)))
+
+;; Start the dispatcher and engine workers.
+(eve-gate.concurrent:start-scheduler *scheduler*)
+
+;; ... submissions ...
+
+;; Stop cleanly.
+(eve-gate.concurrent:stop-scheduler *scheduler* :wait t)
+#+end_src
+
+The =with-scheduler= macro handles construction, start, and unwind-safe stop
+in a single form:
+
+#+begin_src lisp
+(eve-gate.concurrent:with-scheduler (s :cache-manager cm)
+  (eve-gate.concurrent:submit-refresh s
+    :operation-id "get_status"
+    :priority :warm
+    :on-complete (lambda (c) (process-status c))))
+#+end_src
+
+Both =start-scheduler= and =stop-scheduler= are idempotent.
+
+*** Submitting a refresh
+
+=submit-refresh= takes an =:operation-id= (the ESI swagger ID as a string or
+symbol — both =get-status= and ="get_status"= resolve to the same endpoint),
+any path or query =:params= as a plist, a required =:priority=, and up to
+three callbacks. Returns a =refresh-handle=.
+
+#+begin_src lisp
+(eve-gate.concurrent:submit-refresh *scheduler*
+  :operation-id "get_markets_region_id_orders"
+  :params '(:region-id 10000002 :type-id 587 :order-type "sell")
+  :priority :hot
+  :deadline-seconds 300
+  :batch-id "heat-map-cycle-42"
+  :on-complete (lambda (completion)
+                 (process-orders (eve-gate.concurrent:refresh-completion-data completion)))
+  :on-skip (lambda (completion)
+             (log-skip (eve-gate.concurrent:refresh-completion-event completion)))
+  :on-fail (lambda (completion)
+             (log-failure (eve-gate.concurrent:refresh-completion-event completion))))
+#+end_src
+
+*Priority is required.* The scheduler refuses to guess a tier — omission
+signals =scheduler-missing-priority=. Accepted values:
+
+| Priority    | Engine class       | Default deadline | Use case                              |
+|-------------+--------------------+------------------+---------------------------------------|
+| =:critical= | error recovery     | 30 s             | Auth flows, error-handling re-fetches |
+| =:hot=      | user-initiated     | 5 min            | Heat-map's volatile-endpoint cadence  |
+| =:warm=     | standard refresh   | 30 min           | Heat-map's moderate cadence           |
+| =:cold=     | background prefetch | 6 h              | Periodic refresh of stable data       |
+| =:bootstrap= | (internal)         | 6 h              | Use =submit-bootstrap= — see below     |
+
+=:bootstrap= as a =:priority= argument to =submit-refresh= signals
+=scheduler-invalid-priority=. Bulk drains have their own verb because they
+share the engine but use a separately-paced dispatcher branch.
+
+*** Outcomes and the completion struct
+
+The three callbacks correspond to three terminal outcomes:
+
+| Callback     | Fires for outcomes  | =event= slot value         |
+|--------------+---------------------+----------------------------|
+| =:on-complete= | =:ok=, =:cache-hit= | nil                        |
+| =:on-skip=     | =:skipped=          | =esi-skip= instance        |
+| =:on-fail=     | =:failed=           | =esi-failure= instance     |
+
+Every callback receives a =refresh-completion= struct with timing data,
+the endpoint and operation-id, the batch-id, the attempt count, and either
+the response data (=:ok=, =:cache-hit=) or a typed condition instance carrying
+the reason (=:skipped=, =:failed=). The condition hierarchy is detailed in the
+[[file:error-handling.org][Error Handling Guide]].
+
+#+begin_src lisp
+;; Pattern: branch on outcome, then on event class for the exceptional cases.
+(lambda (completion)
+  (case (eve-gate.concurrent:refresh-completion-outcome completion)
+    (:ok        (use-fresh-data (eve-gate.concurrent:refresh-completion-data completion)))
+    (:cache-hit (use-cached-data (eve-gate.concurrent:refresh-completion-data completion)))
+    (:skipped   (typecase (eve-gate.concurrent:refresh-completion-event completion)
+                  (eve-gate.concurrent:esi-budget-exhausted (defer-to-next-cycle))
+                  (eve-gate.concurrent:esi-deadline-missed  (log-late))
+                  (eve-gate.concurrent:esi-cancelled        (no-op))))
+    (:failed    (handle-failure (eve-gate.concurrent:refresh-completion-event completion)))))
+#+end_src
+
+*** Cache short-circuit
+
+When the scheduler has a =cache-manager= attached and the submission's
+(endpoint, params, auth-context) tuple is fresh in the memory tier, the
+completion is delivered synchronously with =outcome :cache-hit=. No
+rate-limit token is consumed and no engine submission happens — the
+callback fires inside =submit-refresh= before the call returns.
+
+Stale entries with a stored ETag fall through to the normal dispatch
+path, where the request-pipeline's cache middleware adds the
+=If-None-Match= header. ESI returns 304 if unchanged, and the response
+middleware serves the cached body. The scheduler does not add
+=If-None-Match= itself — that responsibility lives on the middleware,
+which prevents two competing conditional-request headers from landing on
+the wire.
+
+*** Predicted-budget gate
+
+The scheduler keeps an internal /in-flight/ counter — submissions
+that have been dispatched but not yet completed — and subtracts it
+(plus a small jitter margin) from the rate-limiter's
+=X-ESI-Error-Limit-Remain= snapshot. The result is
+=predicted-remain=: the budget the scheduler thinks will be left
+after the currently-flying requests land.
+
+When =predicted-remain= drops below =budget-threshold= (default 30), the
+gate closes and non-critical submissions park in a held-queue indexed by
+engine priority instead of dispatching. When =predicted-remain= climbs
+back above =budget-resume= (default 50) the gate reopens. =:critical=
+always bypasses the gate.
+
+The gate's hysteresis prevents flap: the threshold to close (30) is
+lower than the threshold to reopen (50), so a budget that hovers around
+the line does not toggle the gate every poll cycle.
+
+Held submissions whose deadline arrives before the gate reopens are
+delivered as =:skipped= with an =esi-budget-exhausted= event.
+
+#+begin_src lisp
+;; The dispatcher reacts to ESI's actual error-limit headers — there is no
+;; need to manually configure the gate's thresholds for normal operation.
+;; Tuning is offered when the consumer's traffic shape is unusual:
+(eve-gate.concurrent:make-request-scheduler
+  :budget-threshold 50    ; close earlier
+  :budget-resume    100   ; reopen later
+  :jitter-margin    10)   ; conservative bias under bursty traffic
+#+end_src
+
+*** Bulk drain — =submit-bootstrap=
+
+For cold-start fetches that need to run at ESI's safe bulk rate without
+competing with the steady-state heat-map. =submit-bootstrap= accepts a
+list of spec plists (each with =:operation-id=, =:params=, and per-spec
+=:on-complete= / =:on-skip= / =:on-fail=), parks them on a held-queue
+slot reserved for bulk priority, and drains them paced by a per-scheduler
+token bucket (default 5 req/sec).
+
+Returns a =bootstrap-handle= aggregating the per-spec handles plus
+counters for settled, ok, failed, and skipped specs.
+
+#+begin_src lisp
+;; Seed a region's orderbook — every market type in the region.
+(let ((b (eve-gate.concurrent:submit-bootstrap *scheduler*
+           (loop for type-id in market-type-ids
+                 collect (list :operation-id "get_markets_region_id_orders"
+                               :params (list :region-id 10000002
+                                             :type-id type-id)
+                               :on-complete (lambda (c) (insert-orders c))))
+           :batch-id "the-forge-seed"
+           :on-progress (lambda (settled total)
+                          (format t "~D / ~D specs settled~%" settled total))
+           :on-complete (lambda (b-handle)
+                          (format t "Seed done: ~D ok, ~D failed, ~D skipped~%"
+                                  (eve-gate.concurrent:bootstrap-handle-ok-count b-handle)
+                                  (eve-gate.concurrent:bootstrap-handle-failed-count b-handle)
+                                  (eve-gate.concurrent:bootstrap-handle-skipped-count b-handle))))))
+  (use-bootstrap-handle b))
+#+end_src
+
+Pacing is the binding constraint, not queue-walking — the dispatcher
+drains the bootstrap queue from the head only and stops as soon as the
+head is non-dispatchable, so per-tick cost is O(K) where K is the tokens
+acquired, independent of the queue's depth. A 70K-spec batch costs the
+same per tick as a 5-spec batch.
+
+Cache-fresh specs short-circuit synchronously and do not consume pacing
+tokens — a partially-warm seed only pays for the misses.
+
+Bulk submissions past =bootstrap-queue-depth= (default 80000) signal
+=scheduler-queue-full= at the API boundary.
+
+*** Cancellation
+
+#+begin_src lisp
+;; Cancel a single still-pending refresh.
+(eve-gate.concurrent:cancel-refresh *scheduler* handle)
+;; => T if the handle was :pending and got cancelled
+;; => NIL if already :dispatched, :completed, or :cancelled
+
+;; Cancel every still-pending spec in a bootstrap batch.
+(eve-gate.concurrent:cancel-bootstrap *scheduler* bootstrap-handle)
+;; => integer count of refresh-handles actually cancelled
+#+end_src
+
+A cancelled pending handle delivers a =:skipped= completion with an
+=esi-cancelled= event through the consumer's =:on-skip= callback. Already
+=:dispatched= handles complete naturally with their eventual response —
+cancellation is honest, not surprising. There is no way to abort an
+in-flight HTTP request without confusing the consumer's bookkeeping.
+
+*** Observation — =scheduler-state=
+
+A single call returns a multi-block plist designed for sustained 1Hz
+polling by a monitoring harness. Each sub-block acquires only its
+subsystem's locks; the snapshot is not atomic across subsystems but
+consistent within each one.
+
+#+begin_src lisp
+(eve-gate.concurrent:scheduler-state *scheduler*)
+;; => (:budget    (:limit-remain 87 :limit-reset-seconds 42
+;;                 :backoff-remaining 0.0 :consecutive-420s 0
+;;                 :in-flight 3 :predicted-remain 79)
+;;     :queue     (:current-depth 2 :depths-by-priority #(0 1 1 0 0)
+;;                 :total-enqueued 1234 :total-dequeued 1232 ...)
+;;     :bootstrap (:active-p T :batch-id "the-forge-seed"
+;;                 :pending 6843 :completed 12 :failed 0 :paced-rate 5.0)
+;;     :engine    (:total-requests 1232 :success-rate 0.998
+;;                 :avg-latency 0.187 :throughput 4.3 :worker-count 8)
+;;     :cache     (:hit-rate 0.42 :l1-hits 521 :l2-hits 0 :etag-hits 39 ...)
+;;     :scheduler (:total-submitted 1234 :total-cache-hits 521
+;;                 :total-dispatched 700 :total-skipped 13 :total-failed 0
+;;                 :skip-reasons (:cancelled 8 :budget-exhausted 5))
+;;     :recent-failures (...))
+#+end_src
+
+The =:bootstrap= block is NIL when no batch is registered. The =:cache=
+block is NIL when no cache-manager is attached.
+
+=reset-scheduler-stats= zeros the cumulative scheduler-private counters
+without touching live state (in-flight, active handles, or registered
+bootstrap batches). Subsystem-specific stats (rate-limiter, engine,
+queue, cache) are reset separately via their own reset verbs.
+
+*** Configuration knobs
+
+| Knob                       | Default | What it controls                                  |
+|----------------------------+---------+---------------------------------------------------|
+| =:budget-threshold=        | 30      | Predicted-remain below this closes the gate       |
+| =:budget-resume=           | 50      | Predicted-remain at/above this reopens the gate   |
+| =:jitter-margin=           | 5       | Conservative bias on predicted-remain             |
+| =:max-queue-depth=         | 5000    | Engine queue cap; =submit-refresh= rejects beyond |
+| =:worker-count=            | 8       | Engine worker threads                             |
+| =:bootstrap-pacing=        | 5.0     | Bulk drain rate cap (requests/sec)                |
+| =:bootstrap-queue-depth=   | 80000   | Bootstrap held-queue cap                          |
+| =:failure-ring-size=       | 256     | Recent-failures ring buffer size                  |
+| =:dispatcher-poll-interval= | 0.25    | Dispatcher sweep period (seconds)                 |
+
+** Configuration Options (rate-limiter, legacy)
 
 | Option                 | Default | Description                          |
 |------------------------+---------+--------------------------------------|

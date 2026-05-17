@@ -130,23 +130,68 @@ as additional tiers.
 
 *** eve-gate.concurrent
 
-Rate limiting and parallel operations.
+Rate limiting, parallel operations, and the high-level request scheduler.
 
 *Responsibilities:*
 - Token bucket rate limiting
 - Request queuing when rate limited
 - Bulk/parallel request execution
 - Concurrency control
+- Budget-aware, deadline-driven, cache-coherent request dispatch
+- Paced bulk-drain channel for cold-start fetches
+- Unified observation surface across budget, queue, engine, cache, scheduler
 
 *Key Components:*
-- =token-bucket= struct - Rate limiter
+- =token-bucket= struct - Rate limiter primitive
 - =esi-rate-limiter= - ESI-specific multi-bucket limiter
-- Bulk operation functions
-- Worker pool management
+- =concurrent-engine= - Worker pool dispatching =queued-request= work items
+- =request-scheduler= - Submission shell wrapping engine + limiter + cache
+- =refresh-handle= / =refresh-completion= - Per-submission lifecycle types
+- =bootstrap-handle= - Bulk-batch aggregator
+- Bulk operation functions, worker pool management
 
 *Design Notes:*
-Uses token bucket algorithm matching ESI's rate limit behavior.
-Per-endpoint and per-character buckets provide fine-grained control.
+
+The =request-scheduler= sits *above* the engine and rate-limiter rather
+than replacing them. It contributes three behaviours that the lower
+primitives do not compose on their own:
+
+1. *Cache short-circuit at submission.* When a fresh cache entry exists
+   for the (endpoint, params, auth) tuple, the completion is delivered
+   synchronously with =:cache-hit= — no rate-limit token consumed.
+2. *Predicted-budget gate.* Tracks an in-flight counter and subtracts it
+   (plus a small jitter margin) from the rate-limiter's
+   =X-ESI-Error-Limit-Remain= snapshot. When the projection drops below
+   a threshold the gate closes; non-critical submissions park in a
+   held-queue indexed by engine priority. A higher resume threshold
+   reopens the gate, providing hysteresis. =:critical= bypasses
+   unconditionally.
+3. *Paced bulk-drain channel.* =submit-bootstrap= routes a batch onto a
+   separately-paced dispatcher branch driven by a per-scheduler token
+   bucket. The held-queue's bulk slot drains from the head only — once
+   the head is non-dispatchable on the gate or pacing check, the
+   dispatcher stops walking, so per-tick cost is O(K) where K is the
+   tokens dispatched, independent of the queue's depth. A 70K-entry
+   universe-mirror seed costs the same per tick as a 5-entry batch.
+
+The scheduler's condition surface is split into two families with
+distinct lifecycles. =scheduler-error= (subtypes
+=scheduler-missing-priority=, =scheduler-invalid-priority=,
+=scheduler-not-running=, =scheduler-queue-full=,
+=scheduler-unknown-endpoint=) is raised synchronously from
+=submit-refresh= / =submit-bootstrap= for caller-side programmer errors.
+=esi-completion-event= (subfamilies =esi-skip= and =esi-failure=, each
+with concrete leaves) is delivered asynchronously through the per-submission
+callbacks — these are plain conditions, *not* =error= subtypes, because
+they are protocol-bearing data and consumer code escalates via
+=(error event)= only when it wants debugger landing.
+
+=make-eve-client= wires the production HTTP stack (throttling + cache
+middleware) by default. Earlier revisions returned a bare HTTP client
+without middleware — callers using =make-eve-client= now get rate-limited,
+cache-coherent requests transparently. The constructor function
+=make-eve-http-client= remains available for callers that need a hand-built
+client.
 
 *** eve-gate.core
 
