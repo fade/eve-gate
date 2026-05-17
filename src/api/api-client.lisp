@@ -203,18 +203,36 @@ Returns (VALUES body response)."
 (defun resolve-client (client)
   "Resolve a client argument to an http-client.
 
-Generated functions accept either an api-client or a bare http-client
-as their first argument. This function normalizes to an http-client.
+Generated functions and internal callers may pass any of:
+  - `http-client`  — the bare struct from `eve-gate.core`.
+  - `api-client`   — the wrapper carrying token manager and default token.
+  - `eve-client`   — the high-level CLOS object from `eve-gate` that bundles
+    auth + cache + api + http into a single handle. Useful when a consumer
+    wants one `*singleton*` covering everything.
 
-CLIENT: An api-client or http-client
+This normalizes any of those down to an `http-client` struct.
+
+The `eve-client` case is resolved through runtime introspection rather than
+a direct class reference because `eve-gate.api` loads before the `eve-gate`
+package's `eve-client` class is defined; the lookup is harmless when the
+class is absent and active once `make-eve-client` has been called.
+
+CLIENT: An http-client, api-client, or eve-client.
 
 Returns an http-client struct."
-  (typecase client
-    (api-client (api-client-http-client client))
-    (http-client client)
-    (t (error 'type-error
-              :datum client
-              :expected-type '(or api-client http-client)))))
+  (cond
+    ((typep client 'api-client)
+     (api-client-http-client client))
+    ((typep client 'http-client)
+     client)
+    (t
+     (let ((eve-class (find-class 'eve-gate::eve-client nil)))
+       (if (and eve-class (typep client eve-class))
+           (funcall (find-symbol "EVE-CLIENT-HTTP-CLIENT" :eve-gate) client)
+           (error 'type-error
+                  :datum client
+                  :expected-type '(or api-client http-client
+                                      eve-gate::eve-client)))))))
 
 (defun effective-token (client)
   "Get the effective OAuth token for a client.

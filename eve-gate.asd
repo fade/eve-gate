@@ -144,13 +144,15 @@
                         ((:file "rate-limiter")
                          (:file "request-queue" :depends-on ("rate-limiter"))
                          (:file "throttling" :depends-on ("rate-limiter" "request-queue"))
+                         (:file "eve-http-client" :depends-on ("throttling"))
                          (:file "engine" :depends-on ("rate-limiter" "request-queue" "throttling"))
                          (:file "parallel-executor" :depends-on ("engine"))
                          (:file "worker-pool" :depends-on ("engine"))
                          (:file "bulk-operations" :depends-on ("engine" "parallel-executor"))
                          (:file "parallel-client" :depends-on ("engine" "parallel-executor"
                                                                         "bulk-operations"))
-                         (:file "job-queue" :depends-on ("engine"))))
+                         (:file "job-queue" :depends-on ("engine"))
+                         (:file "scheduler" :depends-on ("engine" "eve-http-client"))))
 
                ;; Main interface
                (:file "main"

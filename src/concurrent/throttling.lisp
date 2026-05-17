@@ -236,64 +236,11 @@ Example:
    (make-420-retry-middleware :max-retries max-420-retries)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Throttled client constructor
+;;; Throttled client constructor — see eve-http-client.lisp.
+;;; `make-throttled-http-client` and the canonical `make-eve-http-client` are
+;;; defined together there; this comment marks where the legacy entrypoint
+;;; previously lived so grep'ing for it still leads readers to the right place.
 ;;; ---------------------------------------------------------------------------
-
-(defun make-throttled-http-client (&key (base-url *esi-base-url*)
-                                         (user-agent *user-agent*)
-                                         (connect-timeout 10)
-                                         (read-timeout *default-timeout*)
-                                         (max-retries *default-retries*)
-                                         (rate-limiter nil)
-                                         (rate-limit-timeout 30.0)
-                                         (datasource "tranquility")
-                                         (logging t))
-  "Create an HTTP client with full throttling support.
-
-Combines the standard middleware stack with rate limiting, response tracking,
-and automatic 420 retry handling.
-
-BASE-URL: ESI base URL (default: *esi-base-url*)
-USER-AGENT: User-Agent header value
-CONNECT-TIMEOUT: TCP connection timeout in seconds
-READ-TIMEOUT: Response read timeout in seconds
-MAX-RETRIES: Maximum retry attempts for transient failures
-RATE-LIMITER: ESI rate limiter (default: global instance)
-RATE-LIMIT-TIMEOUT: Seconds to wait for rate limit token (default: 30.0)
-DATASOURCE: ESI datasource (default: \"tranquility\")
-LOGGING: Enable request/response logging (default: T)
-
-Returns an http-client struct with throttling middleware.
-
-Example:
-  (let ((client (make-throttled-http-client)))
-    ;; This client will automatically rate-limit and handle 420s
-    (http-request client \"/v5/status/\"))"
-  (let* ((limiter (or rate-limiter (ensure-rate-limiter)))
-         ;; Build base middleware stack
-         (base-stack (make-resilient-middleware-stack
-                       :datasource datasource
-                       :logging logging
-                       :rate-limit-callback
-                       (lambda (remain reset)
-                         (rate-limiter-record-response
-                          limiter 200
-                          :error-limit-remain remain
-                          :error-limit-reset reset))))
-         ;; Add throttling middleware
-         (throttle-stack (make-throttling-middleware-stack
-                           :rate-limiter limiter
-                           :timeout rate-limit-timeout))
-         ;; Merge all middleware
-         (full-stack (reduce #'add-middleware
-                             throttle-stack
-                             :initial-value base-stack)))
-    (make-http-client :base-url base-url
-                      :user-agent user-agent
-                      :connect-timeout connect-timeout
-                      :timeout read-timeout
-                      :retries max-retries
-                      :middleware full-stack)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Header parsing utilities

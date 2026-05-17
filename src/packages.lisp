@@ -1533,6 +1533,7 @@
    #:cache-manager-database-cache
    #:cache-manager-etag-cache
    #:cache-manager-enabled-p
+   #:cache-manager-default-datasource
 
    ;; Core operations
    #:cache-get
@@ -2133,8 +2134,11 @@
    #:make-420-retry-middleware
    #:make-throttling-middleware-stack
    
-   ;; Throttled client
+   ;; Throttled client (legacy alias; prefer make-eve-http-client)
    #:make-throttled-http-client
+
+   ;; --- Production HTTP client (eve-http-client.lisp) ---
+   #:make-eve-http-client
    
    ;; Status
    #:throttling-status
@@ -2231,6 +2235,119 @@
    #:parallel-client-status
    #:parallel-client-metrics
    
+   ;; --- Request scheduler (scheduler.lisp) ---
+   ;; Constructor + lifecycle
+   #:make-request-scheduler
+   #:start-scheduler
+   #:stop-scheduler
+   #:with-scheduler
+   #:request-scheduler
+   #:request-scheduler-engine
+   #:request-scheduler-cache-manager
+   #:request-scheduler-rate-limiter
+   #:request-scheduler-http-client
+
+   ;; Submission verbs
+   #:submit-refresh
+   #:submit-refresh-batch
+   #:submit-bootstrap
+
+   ;; Cancellation verbs
+   #:cancel-refresh
+   #:cancel-bootstrap
+
+   ;; Observability
+   #:scheduler-state
+   #:reset-scheduler-stats
+
+   ;; Bootstrap handle
+   #:bootstrap-handle
+   #:bootstrap-handle-id
+   #:bootstrap-handle-batch-id
+   #:bootstrap-handle-total
+   #:bootstrap-handle-completed-count
+   #:bootstrap-handle-ok-count
+   #:bootstrap-handle-failed-count
+   #:bootstrap-handle-skipped-count
+   #:bootstrap-handle-cancelled-p
+   #:bootstrap-handle-refresh-handles
+
+   ;; Handle introspection
+   #:refresh-handle
+   #:refresh-handle-id
+   #:refresh-handle-status
+   #:refresh-handle-completion
+   #:refresh-handle-operation-id
+   #:refresh-handle-endpoint
+   #:refresh-handle-priority
+   #:refresh-handle-batch-id
+
+   ;; Completion struct
+   #:refresh-completion
+   #:refresh-completion-outcome
+   #:refresh-completion-event
+   #:refresh-completion-data
+   #:refresh-completion-response
+   #:refresh-completion-etag
+   #:refresh-completion-cache-tier
+   #:refresh-completion-attempt-count
+   #:refresh-completion-enqueued-at
+   #:refresh-completion-dispatched-at
+   #:refresh-completion-completed-at
+   #:refresh-completion-wait-time
+   #:refresh-completion-rate-limit-wait
+   #:refresh-completion-http-latency
+   #:refresh-completion-endpoint
+   #:refresh-completion-operation-id
+   #:refresh-completion-batch-id
+
+   ;; Programmer-error conditions (synchronous, raised from submit-refresh)
+   #:scheduler-error
+   #:scheduler-error-scheduler
+   #:scheduler-error-operation-id
+   #:scheduler-missing-priority
+   #:scheduler-missing-priority-params
+   #:scheduler-invalid-priority
+   #:scheduler-invalid-priority-value
+   #:scheduler-not-running
+   #:scheduler-queue-full
+   #:scheduler-queue-full-priority
+   #:scheduler-unknown-endpoint
+
+   ;; Completion-event conditions (asynchronous, delivered via callback)
+   #:esi-completion-event
+   #:esi-completion-event-scheduler
+   #:esi-completion-event-handle
+   #:esi-completion-event-operation-id
+   #:esi-completion-event-endpoint
+   #:esi-completion-event-batch-id
+   #:esi-completion-event-enqueued-at
+   #:esi-completion-event-completed-at
+   #:esi-completion-event-wait-time
+   #:esi-skip
+   #:esi-skip-deadline-remaining
+   #:esi-budget-exhausted
+   #:esi-budget-exhausted-limit-remain
+   #:esi-budget-exhausted-predicted-remain
+   #:esi-budget-exhausted-budget-threshold
+   #:esi-budget-exhausted-in-flight
+   #:esi-deadline-missed
+   #:esi-deadline-missed-time-in-queue
+   #:esi-cancelled
+   #:esi-failure
+   #:esi-failure-attempt-count
+   #:esi-http-error
+   #:esi-http-error-status
+   #:esi-http-error-response-body
+   #:esi-http-error-response-headers
+   #:esi-http-4xx-error
+   #:esi-http-5xx-error
+   #:esi-network-failure
+   #:esi-network-failure-cause
+   #:esi-rate-limit-exhausted
+   #:esi-rate-limit-exhausted-consecutive-420s
+   #:esi-rate-limit-exhausted-backoff-window
+
    ;; --- Job queue (job-queue.lisp) ---
    ;; Job
    #:job
