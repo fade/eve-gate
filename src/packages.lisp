@@ -2305,6 +2305,13 @@
    #:esi-completion-event-wait-time
    #:esi-skip
    #:esi-skip-deadline-remaining
+   #:esi-budget-exhausted
+   #:esi-budget-exhausted-limit-remain
+   #:esi-budget-exhausted-predicted-remain
+   #:esi-budget-exhausted-budget-threshold
+   #:esi-budget-exhausted-in-flight
+   #:esi-deadline-missed
+   #:esi-deadline-missed-time-in-queue
    #:esi-failure
    #:esi-failure-attempt-count
    #:esi-http-error

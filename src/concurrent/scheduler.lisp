@@ -213,6 +213,43 @@ the HTTP client; `esi-network-failure` here is the scheduler-side completion
 event delivered through a callback. The scheduler translates between them at
 its boundary."))
 
+(define-condition esi-budget-exhausted (esi-skip)
+  ((limit-remain :initarg :limit-remain :initform nil
+                 :reader esi-budget-exhausted-limit-remain
+                 :documentation "Snapshot of X-ESI-Error-Limit-Remain when the skip was decided.")
+   (predicted-remain :initarg :predicted-remain :initform nil
+                     :reader esi-budget-exhausted-predicted-remain
+                     :documentation "limit-remain minus in-flight minus jitter-margin.")
+   (budget-threshold :initarg :budget-threshold :initform nil
+                     :reader esi-budget-exhausted-budget-threshold)
+   (in-flight :initarg :in-flight :initform nil
+              :reader esi-budget-exhausted-in-flight))
+  (:report
+   (lambda (c stream)
+     (format stream
+             "ESI error budget exhausted for ~A: predicted-remain=~A (threshold=~A, in-flight=~A)"
+             (esi-completion-event-endpoint c)
+             (esi-budget-exhausted-predicted-remain c)
+             (esi-budget-exhausted-budget-threshold c)
+             (esi-budget-exhausted-in-flight c))))
+  (:documentation "Skip event: budget was below threshold and stayed there past the deadline."))
+
+(define-condition esi-deadline-missed (esi-skip)
+  ((time-in-queue :initarg :time-in-queue :initform nil
+                  :reader esi-deadline-missed-time-in-queue
+                  :documentation "Seconds the request spent waiting before being skipped."))
+  (:report
+   (lambda (c stream)
+     (format stream "ESI deadline missed for ~A after ~As in queue"
+             (esi-completion-event-endpoint c)
+             (esi-deadline-missed-time-in-queue c))))
+  (:documentation "Skip event: the request sat in the engine queue past its deadline.
+
+Distinct from `esi-budget-exhausted` in that budget pressure was not the
+cause — the queue was just slow. Currently delivered for engine-queue
+expirations; held-queue expirations are reported as `esi-budget-exhausted`
+because the only reason an item is held is that the budget gate was closed."))
+
 (define-condition esi-rate-limit-exhausted (esi-failure)
   ((consecutive-420s :initarg :consecutive-420s :initform 0
                      :reader esi-rate-limit-exhausted-consecutive-420s)
@@ -513,6 +550,18 @@ Slots:
   (failure-ring-index 0 :type (integer 0))
   (handles (make-hash-table :test 'eq) :type hash-table)
   (handles-lock (bt:make-lock "scheduler-handles-lock"))
+  ;; Budget-gate state: :open allows dispatch, :closed defers non-critical
+  ;; submissions to the held-queue. Transitions are hysteresis-gated by
+  ;; budget-threshold (open → closed) and budget-resume (closed → open).
+  (gate-state :open :type keyword)
+  (gate-state-lock (bt:make-lock "scheduler-gate-lock"))
+  ;; Held-queue: vector indexed by engine priority (0..4) holding deferred
+  ;; submission entries. Each entry is a plist (:handle :method :endpoint
+  ;; :query-pairs). The dispatcher thread drains it when the gate is open.
+  (held-queues (make-array 5 :initial-element nil) :type simple-vector)
+  (held-queues-lock (bt:make-lock "scheduler-held-queues-lock"))
+  (dispatcher-thread nil)
+  (dispatcher-poll-interval 0.25 :type single-float)
   (running-p nil :type boolean)
   (lifecycle-lock (bt:make-lock "scheduler-lifecycle-lock")))
 
@@ -535,6 +584,159 @@ Slots:
   "Return SCHEDULER's current in-flight count. Thread-safe snapshot."
   (bt:with-lock-held ((request-scheduler-in-flight-lock scheduler))
     (request-scheduler-in-flight-count scheduler)))
+
+(defun predicted-remain-of (scheduler)
+  "Compute the scheduler's view of the ESI error budget after subtracting
+already-dispatched-but-not-completed requests.
+
+  predicted-remain = error-limit-remain - in-flight-count - jitter-margin
+
+Floored at zero. The jitter-margin absorbs the gap between a header snapshot
+and the moment a wave of responses subtracts from the budget."
+  (let* ((limiter (request-scheduler-rate-limiter scheduler))
+         (remain (esi-rate-limiter-error-limit-remain limiter))
+         (in-flight (scheduler-in-flight-count scheduler))
+         (jitter (request-scheduler-jitter-margin scheduler)))
+    (max 0 (- remain in-flight jitter))))
+
+(defun update-gate-state (scheduler)
+  "Re-evaluate SCHEDULER's gate-state under hysteresis.
+
+Transitions:
+  :open   → :closed   when predicted-remain < budget-threshold
+  :closed → :open     when predicted-remain >= budget-resume
+
+Returns the new gate state."
+  (bt:with-lock-held ((request-scheduler-gate-state-lock scheduler))
+    (let ((predicted (predicted-remain-of scheduler))
+          (state (request-scheduler-gate-state scheduler))
+          (threshold (request-scheduler-budget-threshold scheduler))
+          (resume (request-scheduler-budget-resume scheduler)))
+      (cond
+        ((and (eq state :open) (< predicted threshold))
+         (setf (request-scheduler-gate-state scheduler) :closed)
+         (log-warn "Scheduler gate closing: predicted-remain=~D < threshold=~D"
+                   predicted threshold)
+         :closed)
+        ((and (eq state :closed) (>= predicted resume))
+         (setf (request-scheduler-gate-state scheduler) :open)
+         (log-info "Scheduler gate opening: predicted-remain=~D >= resume=~D"
+                   predicted resume)
+         :open)
+        (t state)))))
+
+(defun gate-open-for-priority-p (scheduler priority)
+  "Return T if SCHEDULER's gate currently admits a submission of PRIORITY.
+
+`:critical` always bypasses the gate. Other priorities admit only when the
+gate is in the :open state. Calls UPDATE-GATE-STATE to pick up the latest
+budget snapshot before deciding."
+  (if (eq priority :critical)
+      t
+      (eq (update-gate-state scheduler) :open)))
+
+(defun hold-submission (scheduler handle method endpoint query-pairs)
+  "Park a non-dispatched submission on SCHEDULER's held-queue, indexed by
+the handle's engine-priority. The dispatcher thread will either dispatch
+the entry (when the gate opens) or skip it with `esi-budget-exhausted`
+(when its deadline expires)."
+  (let* ((engine-priority
+           (cdr (assoc (refresh-handle-priority handle)
+                       *scheduler-priority-map* :test #'eq)))
+         (entry (list :handle handle
+                      :method method
+                      :endpoint endpoint
+                      :query-pairs query-pairs)))
+    (bt:with-lock-held ((request-scheduler-held-queues-lock scheduler))
+      (let ((q (aref (request-scheduler-held-queues scheduler) engine-priority)))
+        (setf (aref (request-scheduler-held-queues scheduler) engine-priority)
+              (nconc q (list entry)))))))
+
+(defun build-budget-exhausted-completion (scheduler handle predicted)
+  "Construct a `:skipped` refresh-completion carrying an `esi-budget-exhausted`
+event. Called by the dispatcher when a held submission's deadline arrives
+before the gate opens."
+  (let* ((now (get-universal-time))
+         (enqueued-at (refresh-handle-enqueued-at handle))
+         (event (make-condition
+                 'esi-budget-exhausted
+                 :scheduler scheduler
+                 :handle handle
+                 :operation-id (refresh-handle-operation-id handle)
+                 :endpoint (refresh-handle-endpoint handle)
+                 :batch-id (refresh-handle-batch-id handle)
+                 :enqueued-at enqueued-at
+                 :completed-at now
+                 :wait-time (max 0.0 (float (- now enqueued-at)))
+                 :deadline-remaining-at-skip 0
+                 :limit-remain
+                 (esi-rate-limiter-error-limit-remain
+                  (request-scheduler-rate-limiter scheduler))
+                 :predicted-remain predicted
+                 :budget-threshold (request-scheduler-budget-threshold scheduler)
+                 :in-flight (scheduler-in-flight-count scheduler))))
+    (%make-refresh-completion
+     :outcome :skipped
+     :event event
+     :enqueued-at enqueued-at
+     :completed-at now
+     :wait-time (max 0.0 (float (- now enqueued-at)))
+     :endpoint (refresh-handle-endpoint handle)
+     :operation-id (refresh-handle-operation-id handle)
+     :batch-id (refresh-handle-batch-id handle))))
+
+(defun drain-held-queues-once (scheduler)
+  "Walk the held queues from highest priority to lowest, exactly once.
+
+For each held entry in FIFO order within its priority:
+  - If the handle has been cancelled, drop the entry silently (its
+    completion was delivered through the cancellation path).
+  - Else if the deadline has passed, skip it with esi-budget-exhausted.
+  - Else if the gate is currently open for the entry's priority, dispatch.
+  - Else leave the entry in place for the next sweep."
+  (let ((now (get-universal-time)))
+    (bt:with-lock-held ((request-scheduler-held-queues-lock scheduler))
+      (loop for priority from 0 to 4 do
+        (let ((q (aref (request-scheduler-held-queues scheduler) priority))
+              (keep '()))
+          (dolist (entry q)
+            (let* ((handle (getf entry :handle))
+                   (deadline (refresh-handle-deadline-at handle))
+                   (status (refresh-handle-status handle)))
+              (cond
+                ((eq status :cancelled)
+                 nil)
+                ((> now deadline)
+                 (deliver-completion
+                  scheduler handle
+                  (build-budget-exhausted-completion
+                   scheduler handle (predicted-remain-of scheduler))))
+                ((gate-open-for-priority-p
+                  scheduler (refresh-handle-priority handle))
+                 (dispatch-via-engine scheduler handle
+                                      (getf entry :method)
+                                      (getf entry :endpoint)
+                                      (getf entry :query-pairs)))
+                (t
+                 (push entry keep)))))
+          (setf (aref (request-scheduler-held-queues scheduler) priority)
+                (nreverse keep)))))))
+
+(defun dispatcher-loop (scheduler)
+  "Main loop of the scheduler's dispatcher thread.
+
+Wakes every DISPATCHER-POLL-INTERVAL seconds and calls
+`drain-held-queues-once`. The interval defaults to 0.25s, which adds at
+most that much latency to held submissions that become dispatchable
+between sweeps. The thread exits cleanly when RUNNING-P flips to NIL."
+  (log-debug "Scheduler dispatcher thread started")
+  (unwind-protect
+       (loop while (request-scheduler-running-p scheduler)
+             do (handler-case (drain-held-queues-once scheduler)
+                  (error (e)
+                    (log-error "Scheduler dispatcher loop error: ~A" e)))
+                (sleep (request-scheduler-dispatcher-poll-interval scheduler)))
+    (log-debug "Scheduler dispatcher thread exiting")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Statistics helpers
@@ -584,7 +786,8 @@ counters. Thread-safe."
                                     (rate-limit-timeout 30.0)
                                     (bootstrap-queue-depth 80000)
                                     (bootstrap-pacing 5.0)
-                                    (failure-ring-size 256))
+                                    (failure-ring-size 256)
+                                    (dispatcher-poll-interval 0.25))
   "Create a request-scheduler with sane production defaults.
 
 Most consumers supply :cache-manager (so the cache short-circuit is active)
@@ -620,29 +823,39 @@ Returns a request-scheduler. Call start-scheduler to bring it online."
      :bootstrap-queue-depth bootstrap-queue-depth
      :bootstrap-pacing bootstrap-pacing
      :failure-ring ring
-     :failure-ring-size failure-ring-size)))
+     :failure-ring-size failure-ring-size
+     :dispatcher-poll-interval (float dispatcher-poll-interval))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
 ;;; ---------------------------------------------------------------------------
 
 (defun start-scheduler (scheduler)
-  "Bring SCHEDULER online. Starts the engine's worker threads. Idempotent.
-Returns the scheduler."
+  "Bring SCHEDULER online. Starts the engine's worker threads and the
+scheduler's dispatcher thread. Idempotent. Returns the scheduler."
   (bt:with-lock-held ((request-scheduler-lifecycle-lock scheduler))
     (unless (request-scheduler-running-p scheduler)
       (start-engine (request-scheduler-engine scheduler))
-      (setf (request-scheduler-running-p scheduler) t)
+      (setf (request-scheduler-running-p scheduler) t
+            (request-scheduler-dispatcher-thread scheduler)
+            (bt:make-thread
+             (lambda () (dispatcher-loop scheduler))
+             :name "eve-gate-scheduler-dispatcher"))
       (log-info "Request scheduler started with ~D engine workers"
                 (request-scheduler-worker-count scheduler))))
   scheduler)
 
 (defun stop-scheduler (scheduler &key (wait t))
-  "Take SCHEDULER offline. Drains the engine (if WAIT) and stops the bootstrap
-pool if it has been started. Idempotent. Returns the scheduler."
+  "Take SCHEDULER offline. Stops the dispatcher thread, drains the engine
+(if WAIT), and stops the bootstrap pool if it has been started.
+Idempotent. Returns the scheduler."
   (bt:with-lock-held ((request-scheduler-lifecycle-lock scheduler))
     (when (request-scheduler-running-p scheduler)
       (setf (request-scheduler-running-p scheduler) nil)
+      (let ((thread (request-scheduler-dispatcher-thread scheduler)))
+        (when (and thread (bt:thread-alive-p thread) wait)
+          (bt:join-thread thread))
+        (setf (request-scheduler-dispatcher-thread scheduler) nil))
       (stop-engine (request-scheduler-engine scheduler) :wait wait)
       ;; Bootstrap pool is shut down here once that subsystem lands.
       (log-info "Request scheduler stopped")))
@@ -1033,17 +1246,25 @@ refresh-handle-status and its result with refresh-handle-completion."
                         (consult-cache-for-submission
                          scheduler endpoint query-pairs op-string)
                         :miss)))
-              (if (and (consp cache-result) (eq (first cache-result) :hit))
-                  (deliver-completion
-                   scheduler handle
-                   (build-completion-from-cache-hit
-                    handle
-                    (second cache-result)
-                    (third cache-result)
-                    (fourth cache-result)
-                    now))
-                  (dispatch-via-engine scheduler handle method endpoint
-                                       query-pairs))
+              (cond
+                ;; Cache fresh — synchronous short-circuit, no engine touch.
+                ((and (consp cache-result) (eq (first cache-result) :hit))
+                 (deliver-completion
+                  scheduler handle
+                  (build-completion-from-cache-hit
+                   handle
+                   (second cache-result)
+                   (third cache-result)
+                   (fourth cache-result)
+                   now)))
+                ;; Gate open (or priority :critical) — dispatch immediately.
+                ((gate-open-for-priority-p scheduler priority)
+                 (dispatch-via-engine scheduler handle method endpoint
+                                      query-pairs))
+                ;; Gate closed for non-critical — park on the held queue
+                ;; for the dispatcher to revisit when budget recovers.
+                (t
+                 (hold-submission scheduler handle method endpoint query-pairs)))
               handle)))))))
 
 (defun submit-refresh-batch (scheduler specs
