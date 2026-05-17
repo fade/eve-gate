@@ -770,6 +770,29 @@ Safe to call exactly once per handle; further calls are silently ignored."
 ;;; Dispatch path — engine-backed submission
 ;;; ---------------------------------------------------------------------------
 
+(defun build-completion-from-cache-hit (handle data etag tier enqueued-at)
+  "Construct a refresh-completion for an immediate cache-hit short-circuit.
+
+No HTTP was performed; HTTP-LATENCY is nil; DISPATCHED-AT is nil; OUTCOME is
+:cache-hit (distinct from :ok so consumer code and the heat-map can treat the
+\"no fetch needed\" case as the volatility signal it is)."
+  (let ((now (get-universal-time)))
+    (%make-refresh-completion
+     :outcome :cache-hit
+     :data data
+     :etag etag
+     :cache-tier tier
+     :attempt-count 1
+     :enqueued-at enqueued-at
+     :dispatched-at nil
+     :completed-at now
+     :wait-time 0.0
+     :rate-limit-wait 0.0
+     :http-latency nil
+     :endpoint (refresh-handle-endpoint handle)
+     :operation-id (refresh-handle-operation-id handle)
+     :batch-id (refresh-handle-batch-id handle))))
+
 (defun build-completion-from-response (handle response start-time enqueued-at dispatched-at)
   "Construct a refresh-completion for a successful response."
   (let ((now (get-universal-time)))
@@ -784,7 +807,8 @@ Safe to call exactly once per handle; further calls are silently ignored."
      :completed-at now
      :wait-time (max 0.0 (float (- dispatched-at enqueued-at)))
      :rate-limit-wait 0.0
-     :http-latency (max 0.0 (float (- now start-time)))
+     :http-latency (max 0.0 (float (/ (- (get-internal-real-time) start-time)
+                                      internal-time-units-per-second)))
      :endpoint (refresh-handle-endpoint handle)
      :operation-id (refresh-handle-operation-id handle)
      :batch-id (refresh-handle-batch-id handle))))
@@ -854,13 +878,53 @@ boundary rather than altering those existing classes."
      :operation-id (refresh-handle-operation-id handle)
      :batch-id (refresh-handle-batch-id handle))))
 
+(defun consult-cache-for-submission (scheduler endpoint query-pairs op-string)
+  "Consult SCHEDULER's cache-manager for the cache key derived from ENDPOINT,
+QUERY-PAIRS, and the request's auth context.
+
+Returns one of:
+  (:hit VALUE ETAG TIER)   — cache-fresh; caller short-circuits with a :cache-hit
+                              completion. TIER is :l1 or :l2.
+  :miss                    — no fresh cache entry; normal dispatch path.
+
+Returns :miss when no cache-manager is configured.
+
+Stale entries (no fresh value, but an ETag on file) are NOT handled here. The
+cache middleware on the request pipeline reads the same cache during dispatch
+and adds the `If-None-Match` header itself when it finds a stored ETag. Doing
+that annotation at the scheduler level too would result in two competing
+If-None-Match headers on the wire and ESI answering 400. The middleware is
+the canonical site for conditional-request annotation; the scheduler's only
+added value is the synchronous short-circuit on fresh entries before a token
+is consumed."
+  (let ((manager (request-scheduler-cache-manager scheduler)))
+    (unless manager
+      (return-from consult-cache-for-submission :miss))
+    (let* ((auth-context (extract-auth-context-from-params query-pairs))
+           (key (make-cache-key
+                 endpoint
+                 :params query-pairs
+                 :auth-context auth-context
+                 :datasource (cache-manager-default-datasource manager))))
+      (multiple-value-bind (value etag tier)
+          (cache-get manager key :operation-id op-string)
+        (if value
+            (list :hit value etag tier)
+            :miss)))))
+
 (defun dispatch-via-engine (scheduler handle method endpoint query-params)
   "Enqueue HANDLE's underlying request on the scheduler's engine.
 
 The engine's completion callback delivers the refresh-completion. The
 scheduler's in-flight counter is incremented at enqueue and decremented in
 the callback regardless of outcome, so network failures that bypass response
-middleware still release the slot."
+middleware still release the slot.
+
+ETag-conditional annotation (If-None-Match for stale-but-known entries) is
+handled by the cache middleware on the request pipeline, not here. The
+scheduler does not thread `:if-none-match` through — doing so would produce
+two competing If-None-Match headers when a cache-manager is shared between
+the scheduler and the http-client."
   (incf-in-flight scheduler)
   (let* ((enqueued-at (refresh-handle-enqueued-at handle))
          (engine-priority
@@ -957,10 +1021,30 @@ refresh-handle-status and its result with refresh-handle-completion."
                           :on-fail on-fail)))
             (register-handle scheduler handle)
             (bump-stat scheduler :submitted)
-            ;; Direct dispatch path. Cache short-circuit and budget gating
-            ;; layer on in the following commit.
-            (dispatch-via-engine scheduler handle method endpoint query-pairs)
-            handle))))))
+            ;; Cache short-circuit: if the cache holds a still-fresh entry for
+            ;; this (endpoint, params, auth) tuple, deliver a :cache-hit
+            ;; completion immediately without consuming a rate-limit token.
+            ;; Stale entries fall through to normal dispatch; the cache
+            ;; middleware on the request pipeline handles ETag-conditional
+            ;; annotation itself so we don't duplicate the If-None-Match
+            ;; header.
+            (let ((cache-result
+                    (if (eq method :get)
+                        (consult-cache-for-submission
+                         scheduler endpoint query-pairs op-string)
+                        :miss)))
+              (if (and (consp cache-result) (eq (first cache-result) :hit))
+                  (deliver-completion
+                   scheduler handle
+                   (build-completion-from-cache-hit
+                    handle
+                    (second cache-result)
+                    (third cache-result)
+                    (fourth cache-result)
+                    now))
+                  (dispatch-via-engine scheduler handle method endpoint
+                                       query-pairs))
+              handle)))))))
 
 (defun submit-refresh-batch (scheduler specs
                              &key batch-id on-progress on-batch-complete)

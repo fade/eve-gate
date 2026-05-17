@@ -1533,6 +1533,7 @@
    #:cache-manager-database-cache
    #:cache-manager-etag-cache
    #:cache-manager-enabled-p
+   #:cache-manager-default-datasource
 
    ;; Core operations
    #:cache-get
