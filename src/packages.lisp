@@ -2133,8 +2133,11 @@
    #:make-420-retry-middleware
    #:make-throttling-middleware-stack
    
-   ;; Throttled client
+   ;; Throttled client (legacy alias; prefer make-eve-http-client)
    #:make-throttled-http-client
+
+   ;; --- Production HTTP client (eve-http-client.lisp) ---
+   #:make-eve-http-client
    
    ;; Status
    #:throttling-status

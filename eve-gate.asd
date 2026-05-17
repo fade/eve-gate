@@ -144,6 +144,7 @@
                         ((:file "rate-limiter")
                          (:file "request-queue" :depends-on ("rate-limiter"))
                          (:file "throttling" :depends-on ("rate-limiter" "request-queue"))
+                         (:file "eve-http-client" :depends-on ("throttling"))
                          (:file "engine" :depends-on ("rate-limiter" "request-queue" "throttling"))
                          (:file "parallel-executor" :depends-on ("engine"))
                          (:file "worker-pool" :depends-on ("engine"))
