@@ -238,10 +238,20 @@ lock is held across the file IO; counters use atomic increments."
         (progn
           ;; Ensure directory exists
           (ensure-directories-exist path)
-          ;; Write atomically via temp file
-          (let* ((temp-path (make-pathname :name (format nil "~A.tmp"
-                                                         (pathname-name path))
-                                           :defaults path))
+          ;; Write atomically via a per-call uniquely-named temp file,
+          ;; then rename onto the final path.  The temp name embeds the
+          ;; thread name plus a counter+rand suffix so concurrent writers
+          ;; to the same key never collide on the same scratch file —
+          ;; without that uniqueness, two threads racing through this
+          ;; block would both open <name>.tmp for :supersede and one
+          ;; would observe the other's rename mid-flight.
+          (let* ((temp-path (make-pathname
+                             :name (format nil "~A.~A.~A.tmp"
+                                           (pathname-name path)
+                                           (sb-thread:thread-name
+                                            sb-thread:*current-thread*)
+                                           (random most-positive-fixnum))
+                             :defaults path))
                  (json (%serialize-cache-entry key value etag expires-at)))
             (with-open-file (stream temp-path
                                     :direction :output
