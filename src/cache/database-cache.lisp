@@ -48,15 +48,23 @@ Survives application restarts and can store data evicted from L1 memory.
 Slots:
   DIRECTORY: Base directory for cache files
   ENABLED-P: Whether the database cache is active
-  LOCK: Lock for thread safety during file I/O
-  STATS: Statistics plist
-  MAX-AGE: Maximum age in seconds for cache files (for periodic cleanup)"
+  LOCK: Lock for bulk maintenance operations (clear, purge-expired) only.
+        Per-key get/put/delete do NOT acquire this lock — file IO is
+        already concurrency-safe (atomic temp-file rename for writes;
+        idempotent reads), and counter updates use sb-ext:atomic-incf.
+  HITS, MISSES, PUTS, DELETES, ERRORS: Per-tier counters, updated with
+        sb-ext:atomic-incf so they require no lock.
+  MAX-AGE: Maximum age in seconds for cache files (default 7 days)
+           for periodic cleanup."
   (directory *database-cache-directory* :type pathname)
   (enabled-p t :type boolean)
   (lock (bt:make-lock "database-cache-lock"))
-  (stats (list :hits 0 :misses 0 :puts 0 :deletes 0 :errors 0)
-         :type list)
-  (max-age (* 7 24 60 60) :type integer)) ; 7 days default
+  (hits 0 :type sb-ext:word)
+  (misses 0 :type sb-ext:word)
+  (puts 0 :type sb-ext:word)
+  (deletes 0 :type sb-ext:word)
+  (errors 0 :type sb-ext:word)
+  (max-age (* 7 24 60 60) :type integer))
 
 (defun make-database-cache (&key (directory *database-cache-directory*)
                                   (enabled t)
@@ -166,42 +174,43 @@ Returns two values:
   1. The cached value, or NIL if not found/expired
   2. The ETag string, or NIL
 
-Thread-safe."
+Thread-safe. File reads are idempotent and do not acquire any lock;
+multiple readers of the same file (or of disjoint files) proceed in
+parallel. Stats counters use atomic increments."
   (unless (database-cache-enabled-p cache)
     (return-from database-cache-get (values nil nil)))
-  (bt:with-lock-held ((database-cache-lock cache))
-    (let ((path (%cache-file-path cache key)))
-      (handler-case
-          (if (probe-file path)
-              (let ((content (with-open-file (stream path :direction :input
-                                                          :external-format :utf-8)
-                               (let ((buf (make-string (file-length stream))))
-                                 (read-sequence buf stream)
-                                 buf))))
-                (multiple-value-bind (value etag expires-at)
-                    (%deserialize-cache-entry content)
-                  (cond
-                    ;; Entry expired
-                    ((and expires-at (> (get-universal-time) expires-at))
-                     (incf (getf (database-cache-stats cache) :misses))
-                     ;; Return etag even for expired entries (conditional request)
-                     (values nil etag))
-                    ;; Valid entry
-                    (value
-                     (incf (getf (database-cache-stats cache) :hits))
-                     (values value etag))
-                    ;; Deserialization failure
-                    (t
-                     (incf (getf (database-cache-stats cache) :misses))
-                     (values nil nil)))))
-              ;; File not found
-              (progn
-                (incf (getf (database-cache-stats cache) :misses))
-                (values nil nil)))
-        (error (e)
-          (log-warn "Database cache read error for ~A: ~A" key e)
-          (incf (getf (database-cache-stats cache) :errors))
-          (values nil nil))))))
+  (let ((path (%cache-file-path cache key)))
+    (handler-case
+        (if (probe-file path)
+            (let ((content (with-open-file (stream path :direction :input
+                                                        :external-format :utf-8)
+                             (let ((buf (make-string (file-length stream))))
+                               (read-sequence buf stream)
+                               buf))))
+              (multiple-value-bind (value etag expires-at)
+                  (%deserialize-cache-entry content)
+                (cond
+                  ;; Entry expired
+                  ((and expires-at (> (get-universal-time) expires-at))
+                   (sb-ext:atomic-incf (database-cache-misses cache))
+                   ;; Return etag even for expired entries (conditional request)
+                   (values nil etag))
+                  ;; Valid entry
+                  (value
+                   (sb-ext:atomic-incf (database-cache-hits cache))
+                   (values value etag))
+                  ;; Deserialization failure
+                  (t
+                   (sb-ext:atomic-incf (database-cache-misses cache))
+                   (values nil nil)))))
+            ;; File not found
+            (progn
+              (sb-ext:atomic-incf (database-cache-misses cache))
+              (values nil nil)))
+      (error (e)
+        (log-warn "Database cache read error for ~A: ~A" key e)
+        (sb-ext:atomic-incf (database-cache-errors cache))
+        (values nil nil)))))
 
 (defun database-cache-put (cache key value &key etag ttl)
   "Store a value in the database cache.
@@ -214,37 +223,39 @@ TTL: Time-to-live in seconds
 
 Returns T on success, NIL on failure.
 
-Thread-safe."
+Thread-safe. Writes use a temp-file-plus-rename for atomicity, so
+concurrent writers to the same key produce a winner-takes-all result
+without partial files; writers to disjoint keys do not contend. No
+lock is held across the file IO; counters use atomic increments."
   (unless (database-cache-enabled-p cache)
     (return-from database-cache-put nil))
-  (bt:with-lock-held ((database-cache-lock cache))
-    (let ((path (%cache-file-path cache key))
-          (expires-at (if ttl
-                         (+ (get-universal-time) ttl)
-                         (+ (get-universal-time) 
-                            (database-cache-max-age cache)))))
-      (handler-case
-          (progn
-            ;; Ensure directory exists
-            (ensure-directories-exist path)
-            ;; Write atomically via temp file
-            (let* ((temp-path (make-pathname :name (format nil "~A.tmp"
-                                                           (pathname-name path))
-                                             :defaults path))
-                   (json (%serialize-cache-entry key value etag expires-at)))
-              (with-open-file (stream temp-path
-                                      :direction :output
-                                      :if-exists :supersede
-                                      :external-format :utf-8)
-                (write-string json stream))
-              ;; Rename for atomic update
-              (rename-file temp-path path))
-            (incf (getf (database-cache-stats cache) :puts))
-            t)
-        (error (e)
-          (log-warn "Database cache write error for ~A: ~A" key e)
-          (incf (getf (database-cache-stats cache) :errors))
-          nil)))))
+  (let ((path (%cache-file-path cache key))
+        (expires-at (if ttl
+                        (+ (get-universal-time) ttl)
+                        (+ (get-universal-time)
+                           (database-cache-max-age cache)))))
+    (handler-case
+        (progn
+          ;; Ensure directory exists
+          (ensure-directories-exist path)
+          ;; Write atomically via temp file
+          (let* ((temp-path (make-pathname :name (format nil "~A.tmp"
+                                                         (pathname-name path))
+                                           :defaults path))
+                 (json (%serialize-cache-entry key value etag expires-at)))
+            (with-open-file (stream temp-path
+                                    :direction :output
+                                    :if-exists :supersede
+                                    :external-format :utf-8)
+              (write-string json stream))
+            ;; Rename for atomic update
+            (rename-file temp-path path))
+          (sb-ext:atomic-incf (database-cache-puts cache))
+          t)
+      (error (e)
+        (log-warn "Database cache write error for ~A: ~A" key e)
+        (sb-ext:atomic-incf (database-cache-errors cache))
+        nil))))
 
 (defun database-cache-delete (cache key)
   "Remove KEY from the database cache.
@@ -254,20 +265,22 @@ KEY: Cache key string
 
 Returns T if the file was removed, NIL otherwise.
 
-Thread-safe."
+Thread-safe. Idempotent under contention: if two threads race to
+delete the same key, one observes the file and removes it; the other
+observes its absence after the first deletion and reports NIL. No
+lock is held across the file IO; counters use atomic increments."
   (unless (database-cache-enabled-p cache)
     (return-from database-cache-delete nil))
-  (bt:with-lock-held ((database-cache-lock cache))
-    (let ((path (%cache-file-path cache key)))
-      (handler-case
-          (when (probe-file path)
-            (delete-file path)
-            (incf (getf (database-cache-stats cache) :deletes))
-            t)
-        (error (e)
-          (log-warn "Database cache delete error for ~A: ~A" key e)
-          (incf (getf (database-cache-stats cache) :errors))
-          nil)))))
+  (let ((path (%cache-file-path cache key)))
+    (handler-case
+        (when (probe-file path)
+          (delete-file path)
+          (sb-ext:atomic-incf (database-cache-deletes cache))
+          t)
+      (error (e)
+        (log-warn "Database cache delete error for ~A: ~A" key e)
+        (sb-ext:atomic-incf (database-cache-errors cache))
+        nil))))
 
 (defun database-cache-exists-p (cache key)
   "Check if KEY exists in the database cache (file exists).
@@ -277,11 +290,11 @@ KEY: Cache key string
 
 Returns T if a cache file exists for this key.
 
-Thread-safe."
+Thread-safe. The probe-file call is read-only and does not require
+locking."
   (unless (database-cache-enabled-p cache)
     (return-from database-cache-exists-p nil))
-  (bt:with-lock-held ((database-cache-lock cache))
-    (not (null (probe-file (%cache-file-path cache key))))))
+  (not (null (probe-file (%cache-file-path cache key)))))
 
 (defun database-cache-clear (cache)
   "Remove all entries from the database cache.
@@ -290,7 +303,9 @@ CACHE: A database-cache struct
 
 Deletes the entire cache directory tree and recreates it.
 
-Thread-safe."
+Thread-safe. Holds the cache lock to serialize against concurrent
+clear/purge calls; per-key get/put/delete may still proceed
+concurrently and will simply observe absent files."
   (unless (database-cache-enabled-p cache)
     (return-from database-cache-clear nil))
   (bt:with-lock-held ((database-cache-lock cache))
@@ -302,8 +317,11 @@ Thread-safe."
               (dolist (file files)
                 (handler-case (delete-file file) (error () nil))))
             ;; Reset stats
-            (setf (database-cache-stats cache)
-                  (list :hits 0 :misses 0 :puts 0 :deletes 0 :errors 0))
+            (setf (database-cache-hits cache) 0
+                  (database-cache-misses cache) 0
+                  (database-cache-puts cache) 0
+                  (database-cache-deletes cache) 0
+                  (database-cache-errors cache) 0)
             t)
         (error (e)
           (log-warn "Database cache clear error: ~A" e)
@@ -320,11 +338,15 @@ Returns a plist with keys:
   :ERRORS - Number of I/O errors
   :ENABLED - Whether the cache is active
 
-Thread-safe."
-  (bt:with-lock-held ((database-cache-lock cache))
-    (let ((stats (copy-list (database-cache-stats cache))))
-      (append stats
-              (list :enabled (database-cache-enabled-p cache))))))
+Thread-safe. Reads counter slots without locking; values are
+fixnum-sized and read atomically on 64-bit SBCL. The plist is a
+fresh snapshot — concurrent updates after the call do not mutate it."
+  (list :hits (database-cache-hits cache)
+        :misses (database-cache-misses cache)
+        :puts (database-cache-puts cache)
+        :deletes (database-cache-deletes cache)
+        :errors (database-cache-errors cache)
+        :enabled (database-cache-enabled-p cache)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Maintenance
