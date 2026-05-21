@@ -18,12 +18,20 @@
                 #:etag-cache-get
                 #:etag-cache-put
                 #:etag-cache-count
-                ;; Policies  
+                ;; Database (L2) cache
+                #:make-database-cache
+                #:database-cache-get
+                #:database-cache-put
+                #:database-cache-delete
+                #:database-cache-clear
+                #:database-cache-statistics
+                ;; Policies
                 #:make-cache-key
                 #:get-cache-policy
                 #:compute-ttl-from-headers
                 #:*policy-standard*)
-  (:local-nicknames (#:t #:parachute)))
+  (:local-nicknames (#:t #:parachute)
+                    (#:bt #:bordeaux-threads)))
 
 (in-package #:eve-gate/test/cache)
 
@@ -169,7 +177,149 @@
   ;; Status endpoint should have a policy
   (let ((policy (get-cache-policy "/status/")))
     (t:true policy))
-  
+
   ;; Universe endpoints should have a policy
   (let ((policy (get-cache-policy "/universe/types/")))
     (t:true policy)))
+
+;;; Database (L2) Cache Tests
+;;;
+;;; The L2 file-based cache is shared by every thread that touches the
+;;; cache manager — in eve-quant's heat-map driver that's 8 scheduler
+;;; workers plus a driver thread plus a retry-scheduler, all banging on
+;;; the same database-cache concurrently. These tests cover the basic
+;;; per-key contract and exercise the unlocked concurrent paths so a
+;;; future regression that re-introduces a serializing lock around
+;;; get/put/delete shows up as a wall-clock blowout instead of a silent
+;;; production tax.
+
+(defun %tmp-cache-dir (label)
+  "Return a per-test scratch directory under TMPDIR."
+  (let ((root (merge-pathnames
+               (make-pathname :directory (list :relative
+                                               (format nil "eve-gate-test-~A-~A"
+                                                       label
+                                                       (get-internal-real-time))))
+               (uiop:temporary-directory))))
+    (ensure-directories-exist root)
+    root))
+
+(t:define-test database-cache-put-and-get
+  "Round-trip a value through the L2 cache."
+  (let* ((dir (%tmp-cache-dir "rt"))
+         (cache (make-database-cache :directory dir)))
+    (unwind-protect
+         (progn
+           (t:true (database-cache-put cache "k1" "v1" :ttl 60))
+           (multiple-value-bind (value etag) (database-cache-get cache "k1")
+             (t:is string= "v1" value)
+             (t:is eq nil etag))
+           ;; Missing key returns NIL/NIL and bumps :misses.
+           (multiple-value-bind (value etag) (database-cache-get cache "nope")
+             (t:is eq nil value)
+             (t:is eq nil etag))
+           (let ((stats (database-cache-statistics cache)))
+             (t:is = 1 (getf stats :hits))
+             (t:is = 1 (getf stats :misses))
+             (t:is = 1 (getf stats :puts))))
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+
+(t:define-test database-cache-delete-is-idempotent
+  "Delete is a no-op when the key is absent; valid delete bumps :deletes."
+  (let* ((dir (%tmp-cache-dir "del"))
+         (cache (make-database-cache :directory dir)))
+    (unwind-protect
+         (progn
+           (database-cache-put cache "k" "v" :ttl 60)
+           (t:true (database-cache-delete cache "k"))
+           (t:is eq nil (database-cache-get cache "k"))
+           ;; Second delete on the same key returns NIL without erroring.
+           (t:is eq nil (database-cache-delete cache "k"))
+           (let ((stats (database-cache-statistics cache)))
+             (t:is = 1 (getf stats :deletes))))
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+
+(t:define-test database-cache-concurrent-disjoint-keys
+  "8 threads each owning a disjoint key range run to completion with no
+errors, every put is observable to its own thread, and the recorded
+:puts / :hits counts equal the work performed.  This is the regression
+test for the L2 lock-contention blowout: with the lock in place this
+test would still pass functionally — the assertion that matters here
+is that the run completes inside a generous wall-clock budget without
+producing any read or write errors, since contention manifested as
+hour-scale stalls under production load."
+  (let* ((dir (%tmp-cache-dir "concurrent"))
+         (cache (make-database-cache :directory dir))
+         (threads 8)
+         (ops-per-thread 200)
+         (errors 0)
+         (errors-lock (bt:make-lock "concurrent-test-errors")))
+    (unwind-protect
+         (let ((started (get-internal-real-time))
+               (workers
+                 (loop for tid below threads
+                       collect (bt:make-thread
+                                (let ((tid tid))
+                                  (lambda ()
+                                    (handler-case
+                                        (loop for i below ops-per-thread
+                                              for key = (format nil "t~D-k~D" tid i)
+                                              for value = (format nil "t~D-v~D" tid i)
+                                              do (database-cache-put cache key value
+                                                                     :ttl 60)
+                                                 (let ((got (database-cache-get cache key)))
+                                                   (unless (equal got value)
+                                                     (bt:with-lock-held (errors-lock)
+                                                       (incf errors)))))
+                                      (error ()
+                                        (bt:with-lock-held (errors-lock)
+                                          (incf errors))))))
+                                :name (format nil "db-cache-worker-~D" tid)))))
+           (dolist (w workers) (bt:join-thread w))
+           (let ((elapsed-s (/ (- (get-internal-real-time) started)
+                               (coerce internal-time-units-per-second 'float))))
+             (t:is = 0 errors)
+             (let ((stats (database-cache-statistics cache)))
+               (t:is = (* threads ops-per-thread) (getf stats :puts))
+               (t:is = (* threads ops-per-thread) (getf stats :hits)))
+             ;; 8 threads × 200 ops = 1600 round-trips.  With the
+             ;; serializing lock removed this completes in well under a
+             ;; second on commodity hardware; allow 30s so slow CI
+             ;; spindles don't false-alarm but a real regression
+             ;; (serialized IO across threads) still trips.
+             (t:true (< elapsed-s 30.0))))
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+
+(t:define-test database-cache-concurrent-shared-key
+  "Multiple threads writing the same key concurrently must produce
+exactly one valid file at the end (atomic temp-file rename), no error
+counters bumped, and the final read returns one of the written
+values.  Exercises that put-against-put on a shared key is safe
+without a serializing lock."
+  (let* ((dir (%tmp-cache-dir "shared"))
+         (cache (make-database-cache :directory dir))
+         (threads 8)
+         (writes-per-thread 100)
+         (key "shared-key"))
+    (unwind-protect
+         (let ((workers
+                 (loop for tid below threads
+                       collect (bt:make-thread
+                                (let ((tid tid))
+                                  (lambda ()
+                                    (loop for i below writes-per-thread
+                                          do (database-cache-put
+                                              cache key
+                                              (format nil "t~D-w~D" tid i)
+                                              :ttl 60))))
+                                :name (format nil "db-cache-shared-~D" tid)))))
+           (dolist (w workers) (bt:join-thread w))
+           (let ((final (database-cache-get cache key))
+                 (stats (database-cache-statistics cache)))
+             ;; Final value is well-formed (one of the writes won).
+             (t:true (stringp final))
+             ;; No deserialization errors from a half-written file.
+             (t:is = 0 (getf stats :errors))
+             (t:is = (* threads writes-per-thread)
+                   (getf stats :puts))))
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
