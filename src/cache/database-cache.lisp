@@ -170,9 +170,11 @@ Returns multiple values: value, etag, expires-at, or NIL on failure."
 CACHE: A database-cache struct
 KEY: Cache key string
 
-Returns two values:
+Returns three values:
   1. The cached value, or NIL if not found/expired
   2. The ETag string, or NIL
+  3. The serialized entry size in bytes (for L1 byte-accounting on promotion),
+     or NIL when there is no live value
 
 Thread-safe. File reads are idempotent and do not acquire any lock;
 multiple readers of the same file (or of disjoint files) proceed in
@@ -198,7 +200,7 @@ parallel. Stats counters use atomic increments."
                   ;; Valid entry
                   (value
                    (sb-ext:atomic-incf (database-cache-hits cache))
-                   (values value etag))
+                   (values value etag (length content)))
                   ;; Deserialization failure
                   (t
                    (sb-ext:atomic-incf (database-cache-misses cache))

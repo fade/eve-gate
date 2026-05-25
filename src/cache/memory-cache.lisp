@@ -105,6 +105,13 @@ lookups for hot ESI data with bounded memory usage.
 Slots:
   TABLE: Hash-table mapping cache keys to cache-entry structs
   MAX-ENTRIES: Maximum number of entries before LRU eviction
+  MAX-ENTRY-BYTES: Largest single value (by size-estimate) allowed into L1;
+                   larger bodies are refused so a count-bounded cache cannot
+                   retain multi-MB entries. 0 disables the guard.
+  MAX-TOTAL-BYTES: Total byte budget for L1 (summed size-estimate). When a put
+                   pushes the total over budget, LRU entries are evicted until
+                   it fits. Bounds heap even when many sub-MAX-ENTRY-BYTES
+                   entries accumulate. 0 disables the budget.
   LOCK: Read-write lock for thread safety
   LRU-HEAD: Most recently used entry (front of doubly-linked list)
   LRU-TAIL: Least recently used entry (back of doubly-linked list)
@@ -112,27 +119,40 @@ Slots:
   EVICT-EXPIRED-ON-ACCESS: Whether to lazily evict expired entries on read"
   (table (make-hash-table :test 'equal) :type hash-table)
   (max-entries 10000 :type fixnum)
+  (max-entry-bytes 0 :type fixnum)
+  (max-total-bytes 0 :type fixnum)
   (lock (bt:make-lock "memory-cache-lock"))
   (lru-head nil :type (or null cache-entry))
   (lru-tail nil :type (or null cache-entry))
   (stats (list :hits 0 :misses 0 :evictions 0 :expirations 0
-               :puts 0 :deletes 0 :total-size-estimate 0)
+               :puts 0 :deletes 0 :total-size-estimate 0 :skipped-oversize 0)
          :type list)
   (evict-expired-on-access t :type boolean))
 
 (defun make-memory-cache (&key (max-entries 10000)
+                                (max-entry-bytes 0)
+                                (max-total-bytes 0)
                                 (evict-expired-on-access t))
   "Create a new memory cache with the specified capacity.
 
 MAX-ENTRIES: Maximum entries before LRU eviction (default: 10000)
+MAX-ENTRY-BYTES: Refuse single values whose size-estimate exceeds this many
+  bytes (default: 0, disabled). Guards against a few oversized bodies
+  exhausting the heap in a cache that is otherwise bounded only by count.
+MAX-TOTAL-BYTES: Total byte budget; evict LRU entries on put until the summed
+  size-estimate fits (default: 0, disabled). Bounds heap when many smaller
+  entries accumulate past what the count cap would catch.
 EVICT-EXPIRED-ON-ACCESS: Lazily remove expired entries on read (default: T)
 
 Returns a MEMORY-CACHE struct.
 
 Example:
-  (make-memory-cache :max-entries 5000)"
+  (make-memory-cache :max-entries 5000 :max-entry-bytes 262144
+                     :max-total-bytes 805306368)"
   (%make-memory-cache
    :max-entries max-entries
+   :max-entry-bytes max-entry-bytes
+   :max-total-bytes max-total-bytes
    :evict-expired-on-access evict-expired-on-access))
 
 ;;; ---------------------------------------------------------------------------
@@ -264,9 +284,22 @@ SIZE-ESTIMATE: Approximate value size in bytes
 
 Evicts the least recently used entry if the cache is full.
 
-Returns the cache-entry that was stored.
+Returns the cache-entry that was stored, or NIL if the value exceeded
+MAX-ENTRY-BYTES and was refused.
 
 Thread-safe."
+  ;; Oversize guard: this cache is bounded by entry COUNT, so a single
+  ;; multi-MB value (e.g. a full-region market-orders page) lets a few
+  ;; thousand entries exhaust the heap long before the count cap evicts.
+  ;; Refuse oversized bodies here, keeping L1 for small reusable responses;
+  ;; the caller's L2 tier still persists the large body. A size-estimate of
+  ;; 0 means "unknown" and is never treated as oversized.
+  (when (and (plusp (memory-cache-max-entry-bytes cache))
+             (plusp size-estimate)
+             (> size-estimate (memory-cache-max-entry-bytes cache)))
+    (bt:with-lock-held ((memory-cache-lock cache))
+      (%inc-stat cache :skipped-oversize))
+    (return-from memory-cache-put nil))
   (bt:with-lock-held ((memory-cache-lock cache))
     ;; Remove existing entry if present
     (let ((existing (gethash key (memory-cache-table cache))))
@@ -285,6 +318,15 @@ Thread-safe."
       (%lru-push-front cache entry)
       (%inc-stat cache :puts)
       (%inc-stat cache :total-size-estimate size-estimate)
+      ;; Byte-budget eviction: drop LRU entries until the summed size fits.
+      ;; Runs after the insert, so the just-stored entry (now at the front) is
+      ;; the last candidate. Bounds total heap even when many entries each sit
+      ;; under MAX-ENTRY-BYTES — the count cap alone cannot.
+      (when (plusp (memory-cache-max-total-bytes cache))
+        (loop while (and (> (getf (memory-cache-stats cache) :total-size-estimate)
+                            (memory-cache-max-total-bytes cache))
+                         (> (hash-table-count (memory-cache-table cache)) 1))
+              do (%memory-cache-evict-lru cache)))
       entry)))
 
 (defun memory-cache-delete (cache key)
@@ -328,7 +370,7 @@ Thread-safe."
           (memory-cache-lru-tail cache) nil
           (memory-cache-stats cache)
           (list :hits 0 :misses 0 :evictions 0 :expirations 0
-                :puts 0 :deletes 0 :total-size-estimate 0))))
+                :puts 0 :deletes 0 :total-size-estimate 0 :skipped-oversize 0))))
 
 (defun memory-cache-count (cache)
   "Return the number of entries currently in the cache.

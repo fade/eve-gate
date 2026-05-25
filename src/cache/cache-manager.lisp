@@ -60,6 +60,8 @@ Slots:
   (default-datasource "tranquility" :type string))
 
 (defun make-cache-manager (&key (memory-cache-size 10000)
+                                 (memory-cache-max-entry-bytes 131072)
+                                 (memory-cache-max-total-bytes 0)
                                  (etag-cache-size 50000)
                                  (database-cache-enabled nil)
                                  (database-cache-directory *database-cache-directory*)
@@ -69,6 +71,15 @@ Slots:
   "Create a new cache manager with the specified configuration.
 
 MEMORY-CACHE-SIZE: Max entries in L1 memory cache (default: 10000)
+MEMORY-CACHE-MAX-ENTRY-BYTES: Largest single response body admitted to L1,
+  by Content-Length (default: 131072 = 128 KiB; 0 disables). L1 is bounded by
+  entry count, so this stops a handful of oversized bodies (e.g. full-region
+  market-orders pages, ~232 KB) from exhausting the heap before the count cap
+  evicts. 128 KiB sits clear of the hottest single-type orderbook (~50 KB).
+MEMORY-CACHE-MAX-TOTAL-BYTES: Total L1 byte budget (default: 0, disabled).
+  When set, puts evict LRU entries until the summed size fits — bounds heap
+  even when many sub-MAX-ENTRY-BYTES entries accumulate past what the count
+  cap catches. Size it above the expected working set and below the heap.
 ETAG-CACHE-SIZE: Max entries in ETag cache (default: 50000)
 DATABASE-CACHE-ENABLED: Enable L2 persistent cache (default: NIL)
 DATABASE-CACHE-DIRECTORY: L2 cache directory (default: ~/.cache/eve-gate/)
@@ -86,7 +97,9 @@ Example:
   (make-cache-manager :database-cache-enabled t
                       :memory-cache-size 20000)"
   (%make-cache-manager
-   :memory-cache (make-memory-cache :max-entries memory-cache-size)
+   :memory-cache (make-memory-cache :max-entries memory-cache-size
+                                    :max-entry-bytes memory-cache-max-entry-bytes
+                                    :max-total-bytes memory-cache-max-total-bytes)
    :database-cache (make-database-cache :directory database-cache-directory
                                          :enabled database-cache-enabled
                                          :max-age database-cache-max-age)
@@ -134,16 +147,19 @@ Thread-safe."
 
   ;; 2. Check L2 database cache
   (when (database-cache-enabled-p (cache-manager-database-cache manager))
-    (multiple-value-bind (value etag)
+    (multiple-value-bind (value etag size)
         (database-cache-get (cache-manager-database-cache manager) key)
       (when value
-        ;; Promote to L1
+        ;; Promote to L1. Pass the serialized size so the L1 entry- and
+        ;; total-byte guards apply to promoted entries too, not just to
+        ;; fresh fetches that carry a Content-Length.
         (let ((policy (if operation-id
                           (get-cache-policy operation-id)
                           *policy-standard*)))
           (memory-cache-put (cache-manager-memory-cache manager) key value
                             :etag etag
-                            :ttl (cache-policy-ttl policy)))
+                            :ttl (cache-policy-ttl policy)
+                            :size-estimate (or size 0)))
         (bt:with-lock-held ((cache-manager-lock manager))
           (incf (getf (cache-manager-global-stats manager) :l2-hits)))
         (return-from cache-get (values value etag :l2)))))
@@ -158,6 +174,19 @@ Thread-safe."
         (when expired-entry
           (setf etag (cache-entry-etag expired-entry)))))
     (values nil etag nil)))
+
+(defun %response-size-estimate (headers)
+  "Best-effort byte size of a response body from its Content-Length header.
+HEADERS is an eve-gate response-headers hash-table (keys may be cased either
+way). Returns an integer, or 0 when the header is absent/unparseable; the L1
+oversize guard treats 0 as \"unknown\" (never oversized)."
+  (or (when (hash-table-p headers)
+        (let ((raw (or (gethash "content-length" headers)
+                       (gethash "Content-Length" headers))))
+          (when (and raw (stringp raw))
+            (ignore-errors
+             (parse-integer (string-trim '(#\Space #\Tab) raw))))))
+      0))
 
 (defun cache-put (manager key value &key etag operation-id category headers)
   "Store a value in the cache hierarchy according to the endpoint's policy.
@@ -178,11 +207,14 @@ Thread-safe."
          (ttl (if headers
                   (compute-ttl-from-headers headers (cache-policy-ttl policy))
                   (cache-policy-ttl policy))))
-    ;; Store in L1 memory cache if policy allows
+    ;; Store in L1 memory cache if policy allows. The size-estimate lets the
+    ;; memory cache refuse oversized bodies (count-bounded L1 must not retain
+    ;; multi-MB full-region pages) and populates its byte-accounting stats.
     (when (cache-policy-cache-in-memory-p policy)
       (memory-cache-put (cache-manager-memory-cache manager) key value
                         :etag etag
-                        :ttl ttl))
+                        :ttl ttl
+                        :size-estimate (%response-size-estimate headers)))
 
     ;; Store in L2 database cache if policy allows
     (when (and (cache-policy-cache-in-db-p policy)
