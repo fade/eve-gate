@@ -300,6 +300,28 @@ Example:
 ;;; Token refresh
 ;;; ---------------------------------------------------------------------------
 
+(defun %refresh-failure-type (condition)
+  "Classify a token-refresh failure for operator triage.
+
+Returns :INVALID-GRANT only when CONDITION is positively an EVE SSO
+`invalid_grant' OAuth error — an HTTP 400 whose JSON body carries
+\"error\": \"invalid_grant\", i.e. a dead or revoked refresh token the operator
+must re-link. Every other failure (network error, 5xx, timeout, a 400 without
+that code, or anything unparseable) returns :REFRESH-ERROR, which the consumer
+treats as transient. Conservative by design: never stamp :INVALID-GRANT on a
+failure we cannot positively read as such, so a passing network blip is not
+mistaken for a wedged login."
+  (handler-case
+      (when (typep condition 'dexador.error:http-request-failed)
+        (let ((status (dexador.error:response-status condition))
+              (body (dexador.error:response-body condition)))
+          (when (and (eql status 400) body)
+            (let* ((parsed (com.inuoe.jzon:parse body))
+                   (code (and (hash-table-p parsed) (gethash "error" parsed))))
+              (when (and (stringp code) (string= code "invalid_grant"))
+                :invalid-grant)))))
+    (error () nil)))
+
 (defun refresh-access-token (oauth-client &optional current-refresh-token)
   "Obtain a new access token using the refresh token.
 
@@ -321,25 +343,25 @@ Example:
   (handler-case
       (let ((now (get-universal-time))
             (ciao-oauth (oauth-client-ciao-oauth oauth-client)))
-        ;; If we have an explicit refresh token, set it on the CIAO object
+        ;; With an explicit refresh token, perform a real refresh through CIAO's
+        ;; exported entry point, which acquires a new token from EVE SSO during
+        ;; construction. The previous path set the refresh token on an existing
+        ;; oauth2 object and then only re-read it with re-acquire disabled, so when
+        ;; an oauth2 already existed — every long-running session — no network
+        ;; refresh ever ran and the access token was never renewed.
         (when current-refresh-token
-          (if ciao-oauth
-              (setf (slot-value ciao-oauth 'ciao::refresh-token)
-                    current-refresh-token)
-              ;; No existing CIAO oauth - create a new one with the refresh token
-              (let ((new-oauth (ciao:oauth2/refresh-token
-                                (oauth-client-auth-server oauth-client)
-                                (oauth-client-ciao-client oauth-client)
-                                current-refresh-token)))
-                (setf (oauth-client-ciao-oauth oauth-client) new-oauth)
-                (setf ciao-oauth new-oauth))))
+          (let ((new-oauth (ciao:oauth2/refresh-token
+                            (oauth-client-auth-server oauth-client)
+                            (oauth-client-ciao-client oauth-client)
+                            current-refresh-token)))
+            (setf (oauth-client-ciao-oauth oauth-client) new-oauth)
+            (setf ciao-oauth new-oauth)))
         (unless ciao-oauth
           (error 'eve-sso-token-refresh-failed
                  :sso-error-description "No OAuth session established. Authenticate first."))
-        ;; If we set a refresh token but haven't called refresh yet, do so now
+        ;; Without an explicit refresh token, fall back to CIAO's internal refresh
+        ;; via re-acquire on the existing session.
         (unless current-refresh-token
-          ;; Let CIAO handle the refresh via its internal machinery
-          ;; Force a refresh by requesting the access token with re-acquire
           (ciao:get-access-token ciao-oauth :re-acquire? t))
         ;; Extract the refreshed token information
         (let* ((access-token (ciao:get-access-token ciao-oauth :re-acquire? nil))
@@ -383,6 +405,7 @@ Example:
     (error (e)
       (log-error "EVE SSO token refresh failed: ~A" e)
       (error 'eve-sso-token-refresh-failed
+             :sso-error-type (or (%refresh-failure-type e) :refresh-error)
              :sso-error-description (format nil "~A" e)
              :original-error e))))
 

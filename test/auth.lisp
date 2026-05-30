@@ -34,7 +34,8 @@
                 ;; Conditions
                 #:eve-sso-error
                 #:eve-sso-insufficient-scopes
-                #:eve-sso-token-refresh-failed)
+                #:eve-sso-token-refresh-failed
+                #:eve-sso-error-type)
   (:local-nicknames (#:t #:parachute)))
 
 (in-package #:eve-gate/test/auth)
@@ -219,35 +220,41 @@
 ;;; no usable access token must signal rather than installing an empty token.
 
 (t:define-test refresh-without-usable-token-signals
-  "A refresh that produces no usable access token signals
+  "A refresh that completes but yields no usable access token signals
 EVE-SSO-TOKEN-REFRESH-FAILED instead of installing an empty token, and leaves the
-existing token untouched."
+existing token untouched. The refresh now runs for real, so this stubs a refresh that
+returns an oauth session carrying no access token (e.g. a 2xx with no token in the
+body) — the post-build guard's job is to reject it rather than install an empty token."
   (let* ((client (make-oauth-client :client-id "test-id" :client-secret "test-secret"))
          (manager (make-token-manager client :storage-path nil))
          (now (get-universal-time))
          ;; An already-expired token that still carries a refresh token, so
-         ;; get-valid-access-token takes the refresh path.
+         ;; get-valid-access-token takes the refresh path with no valid fallback.
          (existing (eve-gate.auth::%make-token-info
                     :access-token "old-access-token"
                     :refresh-token "dead-refresh-token"
                     :expires-at (- now 100)
-                    :obtained-at (- now 1300))))
+                    :obtained-at (- now 1300)))
+         (saved (fdefinition 'ciao:oauth2/refresh-token)))
     (setf (eve-gate.auth::token-manager-token manager) existing)
-    ;; Wire a CIAO oauth object holding no access token and an expired (numeric)
-    ;; expiration. This reproduces the live "refresh never executes" shape: the real
-    ;; refresh path reads the access token back as NIL with no error.
-    (let ((ciao-oauth (make-instance 'ciao:oauth2
-                                     :auth-server (eve-gate.auth::oauth-client-auth-server client)
-                                     :client (eve-gate.auth::oauth-client-ciao-client client))))
-      (setf (slot-value ciao-oauth 'ciao::expiration) (- now 100))
-      (setf (slot-value ciao-oauth 'ciao::refresh-token) "dead-refresh-token")
-      (setf (eve-gate.auth::oauth-client-ciao-oauth client) ciao-oauth))
-    ;; The refresh cannot produce a usable token: signal, not a silent empty install.
-    (t:fail (get-valid-access-token manager) 'eve-sso-token-refresh-failed)
-    ;; The manager's token was NOT replaced by an empty token.
-    (t:is eq existing (eve-gate.auth::token-manager-token manager))
-    (t:is string= "old-access-token"
-          (token-info-access-token (eve-gate.auth::token-manager-token manager)))))
+    (unwind-protect
+         (progn
+           ;; Stub a refresh that completes without an access token: the access-token
+           ;; slot stays NIL and the (future) expiration makes the read-back return NIL.
+           (setf (fdefinition 'ciao:oauth2/refresh-token)
+                 (lambda (auth-server ciao-client refresh-token)
+                   (declare (ignore refresh-token))
+                   (let ((o (make-instance 'ciao:oauth2
+                                           :auth-server auth-server :client ciao-client)))
+                     (setf (slot-value o 'ciao::expiration) (+ (get-universal-time) 1200))
+                     o)))
+           ;; No usable token results: signal, not a silent empty install.
+           (t:fail (get-valid-access-token manager) 'eve-sso-token-refresh-failed)
+           ;; The manager's token was NOT replaced by an empty token.
+           (t:is eq existing (eve-gate.auth::token-manager-token manager))
+           (t:is string= "old-access-token"
+                 (token-info-access-token (eve-gate.auth::token-manager-token manager))))
+      (setf (fdefinition 'ciao:oauth2/refresh-token) saved))))
 
 (t:define-test refresh-with-usable-token-installs
   "A normal refresh still installs the refreshed token and returns its access token
@@ -281,3 +288,151 @@ string (the happy path is preserved)."
              (t:true (eve-gate.auth::token-valid-p
                       (eve-gate.auth::token-manager-token manager)))))
       (setf (fdefinition 'eve-gate.auth::refresh-access-token) original-fn))))
+
+;;; Token Refresh Execution Tests
+;;; Regression coverage for the refresh that never executed: with an existing CIAO
+;;; session, refresh-access-token set the refresh token on the session but never made
+;;; the network call, so a long-running token was never renewed and silently went
+;;; stale. It must now force a real refresh through ciao:oauth2/refresh-token,
+;;; short-circuit only when the current token is still comfortably valid, and tag a
+;;; dead/revoked refresh token (invalid_grant) distinctly from a transient failure.
+
+(defmacro with-stubbed-fns ((&rest bindings) &body body)
+  "Temporarily install global function definitions for the extent of BODY, restoring
+them afterward. Each binding is (function-name lambda-form). Used to drive the real
+refresh path with the CIAO/network boundary replaced."
+  (let ((saves (loop for b in bindings collect (gensym "SAVE"))))
+    `(let ,(loop for s in saves for b in bindings
+                 collect `(,s (fdefinition ',(first b))))
+       (unwind-protect
+            (progn
+              ,@(loop for b in bindings
+                      collect `(setf (fdefinition ',(first b)) ,(second b)))
+              ,@body)
+         ,@(loop for s in saves for b in bindings
+                 collect `(setf (fdefinition ',(first b)) ,s))))))
+
+(defun stale-ciao-oauth (client)
+  "A CIAO oauth2 object as a long-running session holds it: an expired access token.
+This is the state in which the old code silently failed to refresh."
+  (let ((o (make-instance 'ciao:oauth2
+                          :auth-server (eve-gate.auth::oauth-client-auth-server client)
+                          :client (eve-gate.auth::oauth-client-ciao-client client))))
+    (setf (slot-value o 'ciao::access-token) "stale-access-token")
+    (setf (slot-value o 'ciao::refresh-token) "stored-refresh-token")
+    (setf (slot-value o 'ciao::expiration) (- (get-universal-time) 100))
+    o))
+
+(defun fresh-ciao-oauth (client)
+  "A CIAO oauth2 object representing a successful refresh: a live access token."
+  (let ((o (make-instance 'ciao:oauth2
+                          :auth-server (eve-gate.auth::oauth-client-auth-server client)
+                          :client (eve-gate.auth::oauth-client-ciao-client client))))
+    (setf (slot-value o 'ciao::access-token) "fresh-access-token")
+    (setf (slot-value o 'ciao::refresh-token) "rotated-refresh-token")
+    (setf (slot-value o 'ciao::expiration) (+ (get-universal-time) 1200))
+    o))
+
+(defun dex-http-failure (status body)
+  "A fully-formed dexador HTTP failure condition, as dexador itself raises it (all
+slots bound, so the production handler can print it while classifying)."
+  (make-condition 'dexador.error:http-request-failed
+                  :status status :body body :headers nil :method :post
+                  :uri (quri:uri "https://login.eveonline.com/v2/oauth/token")))
+
+(t:define-test refresh-executes-network-refresh
+  "With an existing CIAO session and an expired token, get-valid-access-token forces a
+real refresh through ciao:oauth2/refresh-token and returns the renewed token."
+  (let* ((client (make-oauth-client :client-id "id" :client-secret "secret"))
+         (manager (make-token-manager client :storage-path nil))
+         (now (get-universal-time))
+         (called nil))
+    (setf (eve-gate.auth::oauth-client-ciao-oauth client) (stale-ciao-oauth client))
+    (setf (eve-gate.auth::token-manager-token manager)
+          (eve-gate.auth::%make-token-info :access-token "stale-access-token"
+                                           :refresh-token "stored-refresh-token"
+                                           :expires-at (- now 100)
+                                           :obtained-at (- now 1300)))
+    (with-stubbed-fns
+        ((ciao:oauth2/refresh-token
+          (lambda (auth-server ciao-client refresh-token)
+            (declare (ignore auth-server ciao-client refresh-token))
+            (setf called t)
+            (fresh-ciao-oauth client)))
+         (eve-gate.auth::verify-access-token
+          (lambda (access-token) (declare (ignore access-token)) (values 99 "Test Pilot"))))
+      (let ((returned (get-valid-access-token manager)))
+        (t:true called)
+        (t:is string= "fresh-access-token" returned)
+        (t:is string= "fresh-access-token"
+              (token-info-access-token (eve-gate.auth::token-manager-token manager)))))))
+
+(t:define-test refresh-short-circuits-when-token-fresh
+  "A still-valid token outside the refresh threshold is returned without any refresh."
+  (let* ((client (make-oauth-client :client-id "id" :client-secret "secret"))
+         (manager (make-token-manager client :storage-path nil))
+         (now (get-universal-time))
+         (called nil))
+    (setf (eve-gate.auth::oauth-client-ciao-oauth client) (stale-ciao-oauth client))
+    (setf (eve-gate.auth::token-manager-token manager)
+          (eve-gate.auth::%make-token-info :access-token "current-access-token"
+                                           :refresh-token "stored-refresh-token"
+                                           :expires-at (+ now 1000) ; well beyond the 300s threshold
+                                           :obtained-at now))
+    (with-stubbed-fns
+        ((ciao:oauth2/refresh-token
+          (lambda (a c r) (declare (ignore a c r)) (setf called t) (fresh-ciao-oauth client))))
+      (let ((returned (get-valid-access-token manager)))
+        (t:false called)
+        (t:is string= "current-access-token" returned)))))
+
+(t:define-test refresh-renews-within-threshold
+  "A still-valid token inside the refresh threshold is proactively renewed via a real
+refresh. This fails against the inverted-guard code, which never refreshed an existing
+session."
+  (let* ((client (make-oauth-client :client-id "id" :client-secret "secret"))
+         (manager (make-token-manager client :storage-path nil))
+         (now (get-universal-time))
+         (called nil))
+    (setf (eve-gate.auth::oauth-client-ciao-oauth client) (stale-ciao-oauth client))
+    (setf (eve-gate.auth::token-manager-token manager)
+          (eve-gate.auth::%make-token-info :access-token "current-access-token"
+                                           :refresh-token "stored-refresh-token"
+                                           :expires-at (+ now 100) ; inside the 300s threshold, not yet expired
+                                           :obtained-at now))
+    (with-stubbed-fns
+        ((ciao:oauth2/refresh-token
+          (lambda (a c r) (declare (ignore a c r)) (setf called t) (fresh-ciao-oauth client)))
+         (eve-gate.auth::verify-access-token
+          (lambda (at) (declare (ignore at)) (values 99 "Test Pilot"))))
+      (let ((returned (get-valid-access-token manager)))
+        (t:true called)
+        (t:is string= "fresh-access-token" returned)))))
+
+(t:define-test dead-refresh-token-tagged-invalid-grant
+  "A refresh whose HTTP 400 body carries invalid_grant raises eve-sso-token-refresh-failed
+tagged :invalid-grant (the operator-relink signal); every other failure stays
+:refresh-error so a transient blip is never mistaken for a dead token."
+  (let ((client (make-oauth-client :client-id "id" :client-secret "secret")))
+    (setf (eve-gate.auth::oauth-client-ciao-oauth client) (stale-ciao-oauth client))
+    (flet ((tag-for (failure)
+             (with-stubbed-fns
+                 ((ciao:oauth2/refresh-token
+                   (lambda (a c r) (declare (ignore a c r)) (error failure))))
+               (handler-case
+                   (progn (eve-gate.auth::refresh-access-token client "stored-refresh-token")
+                          :no-signal)
+                 (eve-sso-token-refresh-failed (c) (eve-sso-error-type c))))))
+      ;; Positively invalid_grant -> :invalid-grant (the :wedged trigger).
+      (t:is eq :invalid-grant
+            (tag-for (dex-http-failure 400 "{\"error\":\"invalid_grant\"}")))
+      ;; A 400 with a different OAuth error -> transient.
+      (t:is eq :refresh-error
+            (tag-for (dex-http-failure 400 "{\"error\":\"server_error\"}")))
+      ;; A 5xx -> transient.
+      (t:is eq :refresh-error
+            (tag-for (dex-http-failure 503 "service unavailable")))
+      ;; A non-HTTP failure (e.g. network) -> transient.
+      (t:is eq :refresh-error
+            (tag-for (make-condition 'simple-error
+                                     :format-control "connection refused"))))))
