@@ -11,6 +11,9 @@
                 #:oauth-client-scopes
                 #:oauth-client-redirect-uri
                 #:get-authorization-url
+                ;; Token manager / refresh
+                #:make-token-manager
+                #:get-valid-access-token
                 ;; Scopes
                 #:valid-scope-p
                 #:validate-scopes
@@ -30,7 +33,8 @@
                 #:token-needs-refresh-p
                 ;; Conditions
                 #:eve-sso-error
-                #:eve-sso-insufficient-scopes)
+                #:eve-sso-insufficient-scopes
+                #:eve-sso-token-refresh-failed)
   (:local-nicknames (#:t #:parachute)))
 
 (in-package #:eve-gate/test/auth)
@@ -209,3 +213,71 @@
                                    :granted-scopes '())))
     (t:true (typep condition 'eve-sso-error))
     (t:true (typep condition 'eve-sso-insufficient-scopes))))
+
+;;; Token Refresh Tests
+;;; Regression coverage for the silent-empty-refresh defect: a refresh that yields
+;;; no usable access token must signal rather than installing an empty token.
+
+(t:define-test refresh-without-usable-token-signals
+  "A refresh that produces no usable access token signals
+EVE-SSO-TOKEN-REFRESH-FAILED instead of installing an empty token, and leaves the
+existing token untouched."
+  (let* ((client (make-oauth-client :client-id "test-id" :client-secret "test-secret"))
+         (manager (make-token-manager client :storage-path nil))
+         (now (get-universal-time))
+         ;; An already-expired token that still carries a refresh token, so
+         ;; get-valid-access-token takes the refresh path.
+         (existing (eve-gate.auth::%make-token-info
+                    :access-token "old-access-token"
+                    :refresh-token "dead-refresh-token"
+                    :expires-at (- now 100)
+                    :obtained-at (- now 1300))))
+    (setf (eve-gate.auth::token-manager-token manager) existing)
+    ;; Wire a CIAO oauth object holding no access token and an expired (numeric)
+    ;; expiration. This reproduces the live "refresh never executes" shape: the real
+    ;; refresh path reads the access token back as NIL with no error.
+    (let ((ciao-oauth (make-instance 'ciao:oauth2
+                                     :auth-server (eve-gate.auth::oauth-client-auth-server client)
+                                     :client (eve-gate.auth::oauth-client-ciao-client client))))
+      (setf (slot-value ciao-oauth 'ciao::expiration) (- now 100))
+      (setf (slot-value ciao-oauth 'ciao::refresh-token) "dead-refresh-token")
+      (setf (eve-gate.auth::oauth-client-ciao-oauth client) ciao-oauth))
+    ;; The refresh cannot produce a usable token: signal, not a silent empty install.
+    (t:fail (get-valid-access-token manager) 'eve-sso-token-refresh-failed)
+    ;; The manager's token was NOT replaced by an empty token.
+    (t:is eq existing (eve-gate.auth::token-manager-token manager))
+    (t:is string= "old-access-token"
+          (token-info-access-token (eve-gate.auth::token-manager-token manager)))))
+
+(t:define-test refresh-with-usable-token-installs
+  "A normal refresh still installs the refreshed token and returns its access token
+string (the happy path is preserved)."
+  (let* ((client (make-oauth-client :client-id "test-id" :client-secret "test-secret"))
+         (manager (make-token-manager client :storage-path nil))
+         (now (get-universal-time))
+         (existing (eve-gate.auth::%make-token-info
+                    :access-token "old-access-token"
+                    :refresh-token "live-refresh-token"
+                    :expires-at (- now 100)
+                    :obtained-at (- now 1300)))
+         (original-fn (fdefinition 'eve-gate.auth::refresh-access-token)))
+    (setf (eve-gate.auth::token-manager-token manager) existing)
+    (unwind-protect
+         (progn
+           ;; Stub the network boundary with a well-formed refresh result.
+           (setf (fdefinition 'eve-gate.auth::refresh-access-token)
+                 (lambda (oauth-client &optional refresh-token)
+                   (declare (ignore oauth-client refresh-token))
+                   (list :access-token "fresh-access-token"
+                         :refresh-token "rotated-refresh-token"
+                         :expires-in 1200
+                         :token-type "Bearer"
+                         :character-id 99
+                         :character-name "Test Pilot")))
+           (let ((returned (get-valid-access-token manager)))
+             (t:is string= "fresh-access-token" returned)
+             (t:is string= "fresh-access-token"
+                   (token-info-access-token (eve-gate.auth::token-manager-token manager)))
+             (t:true (eve-gate.auth::token-valid-p
+                      (eve-gate.auth::token-manager-token manager)))))
+      (setf (fdefinition 'eve-gate.auth::refresh-access-token) original-fn))))

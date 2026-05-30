@@ -357,6 +357,14 @@ Example:
                        :token-type "Bearer"
                        :scopes scopes
                        :obtained-at now)))
+          ;; A refresh that did not yield a usable access token is a failure, not a
+          ;; success: signal rather than handing back a token-less plist the caller
+          ;; would install and report as authenticated. An expired, unrefreshed CIAO
+          ;; oauth object reads back NIL here.
+          (unless (and (stringp access-token) (plusp (length access-token)))
+            (error 'eve-sso-token-refresh-failed
+                   :sso-error-description
+                   "Token refresh did not yield a usable access token; the refresh token may be expired or revoked."))
           ;; Verify to get character info
           (handler-case
               (multiple-value-bind (character-id character-name)
@@ -368,9 +376,10 @@ Example:
           (log-info "EVE SSO: Token refreshed, expires in ~D seconds"
                     (getf token-info :expires-in))
           token-info))
-    (eve-sso-token-refresh-failed ()
-      ;; Re-raise if already our condition
-      (error (make-condition 'eve-sso-token-refresh-failed)))
+    (eve-sso-token-refresh-failed (c)
+      ;; Already our condition (e.g. the no-usable-token guard above) — re-raise it
+      ;; intact so its description and initargs survive.
+      (error c))
     (error (e)
       (log-error "EVE SSO token refresh failed: ~A" e)
       (error 'eve-sso-token-refresh-failed
